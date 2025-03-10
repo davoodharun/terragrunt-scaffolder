@@ -1,1 +1,0 @@
-## East US region for Non-Production Subscription

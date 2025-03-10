@@ -1,1 +1,0 @@
-# Terragrunt Application Settings

@@ -1,7 +1,9 @@
 stack:
   components:
     rediscache:
-      source: <terraform-source-url>
+      source: azurerm_redis_cache
+      provider: azurerm
+      version: 4.22.0
       deps: []
     servicebus:
       source: <terraform-source-url>
@@ -14,7 +16,9 @@ stack:
         - "eastus2.cosmos_db.{app}"
         - "{region}.serviceplan.{app}"
     serviceplan:
-      source: <terraform-source-url>
+      source: azurerm_service_plan
+      provider: azurerm
+      version: 4.22.0 
       deps: []    
     cosmos_account:
       source: <terraform-source-url>
@@ -25,7 +29,7 @@ stack:
         - eastus2.comsos_account
   architecture:
     regions:
-      centralus:
+      westus:
         - component: appservice
           apps:
             - ace

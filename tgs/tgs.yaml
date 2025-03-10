@@ -9,8 +9,6 @@ subscriptions:
         stack: main
       - name: test
         stack: main
-      - name: stage
-        stack: main
   prod:
     remotestate:
       name: <storage account name>
