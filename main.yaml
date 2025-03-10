@@ -1,0 +1,75 @@
+stack:
+  components:
+    rediscache:
+      source: <terraform-source-url>
+      deps: []
+    servicebus:
+      source: <terraform-source-url>
+      deps: []
+    appservice:
+      source: <terraform-source-url>
+      deps:
+        - "eastus2.redis"
+        - "eastus2.servicebus"
+        - "eastus2.cosmos_db.{app}"
+        - "{region}.serviceplan.{app}"
+    serviceplan:
+      source: <terraform-source-url>
+      deps: []    
+    cosmos_account:
+      source: <terraform-source-url>
+      deps: []
+    cosmos_db:
+      source: <terraform-source-url>
+      deps: eastus2.comsos_account
+  architecture:
+    regions:
+      centralus:
+        - component: appservice
+          apps:
+            - ace
+            - bge
+            - com
+            - dpl
+            - pec
+            - pep
+        - component: serviceplan
+          apps: 
+            - ace
+            - bge
+            - com
+            - dpl
+            - pec
+            - pep
+      eastus2:
+        - component: appservice
+          apps:
+            - ace
+            - bge
+            - com
+            - dpl
+            - pec
+            - pep
+        - component: serviceplan
+          apps: 
+            - ace
+            - bge
+            - com
+            - dpl
+            - pec
+            - pep
+        - component: rediscache
+          apps: []
+        - component: servicebus
+          apps: []
+        - component: cosmos_account
+          apps: []
+        - component: cosmos_db
+          apps:
+            - ace
+            - bge
+            - com
+            - dpl
+            - pec
+            - pep
+        

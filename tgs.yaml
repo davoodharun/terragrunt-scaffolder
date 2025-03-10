@@ -1,0 +1,17 @@
+name:
+subscriptions:
+  nonprod:
+    remotestate:
+      name: <storage account name>
+      resource_group: < storage account resource group name >
+    environments:
+      - name: dev
+        stack: main
+      - name: test
+        stack: main
+      - name: stage
+        stack: main
+  prod:
+    environments:
+      - name: prod
+        stack: main
