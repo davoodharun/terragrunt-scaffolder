@@ -21,7 +21,8 @@ stack:
       deps: []
     cosmos_db:
       source: <terraform-source-url>
-      deps: eastus2.comsos_account
+      deps: 
+        - eastus2.comsos_account
   architecture:
     regions:
       centralus:

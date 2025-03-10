@@ -12,6 +12,9 @@ subscriptions:
       - name: stage
         stack: main
   prod:
+    remotestate:
+      name: <storage account name>
+      resource_group: < storage account resource group name >
     environments:
       - name: prod
         stack: main
