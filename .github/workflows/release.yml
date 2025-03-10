@@ -23,10 +23,9 @@ jobs:
         go-version: '1.21'
         cache: true
     
-    - name: Initialize Go Module
+    - name: Update Go Dependencies
       run: |
         cd tgs
-        go mod init github.com/davoodharun/terragrunt-scaffolder/tgs
         go mod tidy
     
     - name: Build binaries
