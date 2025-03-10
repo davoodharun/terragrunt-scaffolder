@@ -25,7 +25,8 @@ jobs:
     
     - name: Initialize Go Module
       run: |
-        go mod init github.com/davoodharun/terragrunt-scaffolder
+        cd tgs
+        go mod init github.com/davoodharun/terragrunt-scaffolder/tgs
         go mod tidy
     
     - name: Build binaries
