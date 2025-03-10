@@ -1,4 +1,4 @@
-module github.com/davoodharun/tgs
+module github.com/davoodharun/terragrunt-scaffolder
 
 go 1.21
 

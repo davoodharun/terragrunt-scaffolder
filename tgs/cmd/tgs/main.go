@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/davoodharun/terragrunt-scaffolder/internal/scaffold"
 	"github.com/spf13/cobra"
-	"github.com/davoodharun/tgs/internal/scaffold"
 )
 
 func main() {
@@ -31,4 +31,4 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-} 
+}

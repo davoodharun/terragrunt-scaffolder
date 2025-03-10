@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/davoodharun/tgs/internal/config"
-	"github.com/davoodharun/tgs/internal/logger"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 	"gopkg.in/yaml.v3"
 )
 

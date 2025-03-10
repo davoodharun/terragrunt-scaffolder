@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/davoodharun/tgs/internal/logger"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 )
 
 // Move SchemaCache and all provider-related functions here

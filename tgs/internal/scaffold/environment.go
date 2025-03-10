@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/davoodharun/tgs/internal/config"
-	"github.com/davoodharun/tgs/internal/logger"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 )
 
 func generateEnvironment(subName, region string, env config.Environment, mainConfig *config.MainConfig) error {
