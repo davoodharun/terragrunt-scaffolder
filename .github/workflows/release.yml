@@ -25,20 +25,24 @@ jobs:
     
     - name: Update Go Dependencies
       run: |
-        cd tgs
+        cd tgs/cmd
+        go mod init github.com/davoodharun/terragrunt-scaffolder/tgs/cmd
         go mod tidy
     
     - name: Build binaries
       run: |
+        mkdir -p dist
+        cd tgs/cmd
+        
         # Build for Windows
-        GOOS=windows GOARCH=amd64 go build -o ./dist/tgs-windows-amd64.exe ./tgs/cmd/tgs
+        GOOS=windows GOARCH=amd64 go build -o ../../dist/tgs-windows-amd64.exe .
         
         # Build for Linux
-        GOOS=linux GOARCH=amd64 go build -o ./dist/tgs-linux-amd64 ./tgs/cmd/tgs
+        GOOS=linux GOARCH=amd64 go build -o ../../dist/tgs-linux-amd64 .
         
         # Build for macOS
-        GOOS=darwin GOARCH=amd64 go build -o ./dist/tgs-darwin-amd64 ./tgs/cmd/tgs
-        GOOS=darwin GOARCH=arm64 go build -o ./dist/tgs-darwin-arm64 ./tgs/cmd/tgs
+        GOOS=darwin GOARCH=amd64 go build -o ../../dist/tgs-darwin-amd64 .
+        GOOS=darwin GOARCH=arm64 go build -o ../../dist/tgs-darwin-arm64 .
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
