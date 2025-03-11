@@ -93,54 +93,21 @@ func findGitRepoRoot() (string, error) {
 
 // Update the function to get the infrastructure path
 func getInfrastructurePath() string {
-	// First check if the environment variable is set
-	infraPath := os.Getenv("TG_INFRASTRUCTURE_PATH")
-	if infraPath != "" {
-		logger.Info("Using infrastructure path from environment variable: %s", infraPath)
-		return infraPath
-	}
-
-	// If not set, try to determine it automatically
-	gitRoot, err := findGitRepoRoot()
-	if err != nil {
-		logger.Warning("Could not find Git repository root: %v", err)
-		logger.Info("Using default infrastructure path: tgs/.infrastructure")
-		return "tgs/.infrastructure"
-	}
-
-	// Get the current working directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		logger.Warning("Could not get current working directory: %v", err)
-		logger.Info("Using default infrastructure path: tgs/.infrastructure")
-		return "tgs/.infrastructure"
-	}
-
-	// Calculate the relative path from git root to current directory
-	relPath, err := filepath.Rel(gitRoot, cwd)
-	if err != nil {
-		logger.Warning("Could not determine relative path: %v", err)
-		logger.Info("Using default infrastructure path: tgs/.infrastructure")
-		return "tgs/.infrastructure"
-	}
-
-	// If we're in the root of the repo, use the default path
-	if relPath == "." {
-		logger.Info("Current directory is the repository root, using default infrastructure path: tgs/.infrastructure")
-		return "tgs/.infrastructure"
-	}
-
-	// Use the relative path + /.infrastructure
-	infraPath = relPath + "/.infrastructure"
-	logger.Info("Automatically determined infrastructure path: %s", infraPath)
-	return infraPath
+	// Always use .infrastructure at the repo root
+	return ".infrastructure"
 }
 
 func Generate() error {
 	logger.Info("Starting terragrunt scaffolding generation")
 
 	// Get the infrastructure path
-	infraPath := getInfrastructurePath()
+	infraPath := ".infrastructure"
+	logger.Info("Using infrastructure path: %s", infraPath)
+
+	// Create infrastructure directory
+	if err := os.MkdirAll(infraPath, 0755); err != nil {
+		return fmt.Errorf("failed to create infrastructure directory: %w", err)
+	}
 
 	// Read TGS config
 	tgsConfig, err := readTGSConfig()
@@ -244,7 +211,7 @@ include "subscription" {
 
 locals {
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "tgs/.infrastructure")
+  infrastructure_path = ".infrastructure"
 }`
 				if err := createFile(filepath.Join(envPath, "terragrunt.hcl"), tgHCL); err != nil {
 					return fmt.Errorf("failed to create terragrunt.hcl: %w", err)
@@ -264,7 +231,7 @@ locals {
 
 locals {
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "tgs/.infrastructure")
+  infrastructure_path = ".infrastructure"
 }
 
 include "component" {
@@ -288,7 +255,7 @@ include "component" {
 
 locals {
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "tgs/.infrastructure")
+  infrastructure_path = ".infrastructure"
 }
 
 include "component" {
@@ -385,7 +352,7 @@ func getEnvironmentPrefix(env string) string {
 	return "E" // Default fallback
 }
 
-// Update generateDependencyBlocks to use the infrastructure path variable
+// Update generateDependencyBlocks to use the fixed infrastructure path
 func generateDependencyBlocks(deps []string, infraPath string) string {
 	if len(deps) == 0 {
 		return ""
@@ -393,38 +360,51 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 
 	var blocks []string
 	for _, dep := range deps {
-		parts := strings.Split(dep, ":")
-		componentName := parts[0]
-		region := "{region}" // Default to current region
-		if len(parts) > 1 {
-			region = parts[1]
+		parts := strings.Split(dep, ".")
+
+		if len(parts) < 2 {
+			logger.Warning("Invalid dependency format: %s, skipping", dep)
+			continue
 		}
 
-		if strings.HasPrefix(componentName, "app.") {
-			// App-specific dependency
-			appName := strings.TrimPrefix(componentName, "app.")
-			block := fmt.Sprintf(`
-dependency "%s" {
-  config_path = "${get_repo_root()}/${local.infrastructure_path}/${local.subscription_name}/%s/${local.environment_name}/%s/${local.app_name}"
-}`, componentName, resolveDependencyRegion(region), appName)
-			blocks = append(blocks, block)
-		} else {
-			block := fmt.Sprintf(`
-dependency "%s" {
-  config_path = "${get_repo_root()}/${local.infrastructure_path}/${local.subscription_name}/%s/${local.environment_name}/%s"
-}`, componentName, resolveDependencyRegion(region), componentName)
-			blocks = append(blocks, block)
+		region := parts[0]
+		component := parts[1]
+		app := ""
+
+		if len(parts) > 2 {
+			app = parts[2]
 		}
+
+		// Replace placeholders
+		if region == "{region}" {
+			region = "${local.region_vars.locals.region_name}"
+		}
+
+		depName := component
+		configPath := ""
+
+		if app == "" || app == "{app}" {
+			if app == "{app}" {
+				// App-specific dependency using current app
+				configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/${local.subscription_name}/%s/${local.environment_name}/%s/${local.app_name}", region, component)
+			} else {
+				// Component-level dependency
+				configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/${local.subscription_name}/%s/${local.environment_name}/%s", region, component)
+			}
+		} else {
+			// App-specific dependency with fixed app name
+			configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/${local.subscription_name}/%s/${local.environment_name}/%s/%s", region, component, app)
+			depName = fmt.Sprintf("%s_%s", component, app)
+		}
+
+		block := fmt.Sprintf(`
+dependency "%s" {
+  config_path = "%s"
+}`, depName, configPath)
+		blocks = append(blocks, block)
 	}
 
 	return strings.Join(blocks, "\n")
-}
-
-func resolveDependencyRegion(region string) string {
-	if region == "{region}" {
-		return "${local.region_name}"
-	}
-	return region
 }
 
 func generateMainTF(comp config.Component, schema *ProviderSchema) string {
@@ -846,6 +826,12 @@ func readTGSConfig() (*config.TGSConfig, error) {
 		return nil, err
 	}
 
+	// Set a default project name if it's empty
+	if cfg.Name == "" {
+		logger.Warning("Project name not set in tgs.yaml, using default: CUSTTP")
+		cfg.Name = "CUSTTP"
+	}
+
 	return &cfg, nil
 }
 
@@ -1018,7 +1004,7 @@ locals {
   environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
   
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+  infrastructure_path = ".infrastructure"
   
   # Load global and environment-specific configurations
   global_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/global.hcl")
@@ -1134,7 +1120,7 @@ locals {
   remote_state_storage_account = local.subscription_vars.locals.remote_state_storage_account
   
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+  infrastructure_path = ".infrastructure"
 }
 
 remote_state {

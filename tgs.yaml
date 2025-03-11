@@ -1,0 +1,18 @@
+name: # Your project name
+subscriptions:
+  nonprod:
+    remotestate:
+      name: # Storage account name for remote state
+      resource_group: # Resource group for remote state
+    environments:
+      - name: dev
+        stack: main
+      - name: test
+        stack: main
+  prod:
+    remotestate:
+      name: # Storage account name for remote state
+      resource_group: # Resource group for remote state
+    environments:
+      - name: prod
+        stack: main

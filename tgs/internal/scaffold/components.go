@@ -45,7 +45,7 @@ locals {
   environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
 
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+  infrastructure_path = ".infrastructure"
   
   # Load global configuration
   global_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/global.hcl")
@@ -89,7 +89,7 @@ inputs = {
       Region = local.region_name
     }
   )
-}`, infraPath, compName, generateDependencyBlocks(comp.Deps, infraPath))
+}`, compName, generateDependencyBlocks(comp.Deps, infraPath))
 
 		if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
 			return err
