@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/davoodharun/terragrunt-scaffolder/internal/diagram"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/scaffold"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/template"
 	"github.com/spf13/cobra"
@@ -69,6 +70,15 @@ func main() {
 		},
 	}
 
+	// Generate diagram command
+	diagramCmd := &cobra.Command{
+		Use:   "diagram",
+		Short: "Generate a Mermaid diagram of the infrastructure layout",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return diagram.GenerateDiagram()
+		},
+	}
+
 	// Add subcommands to create command
 	createCmd.AddCommand(createStackCmd)
 
@@ -77,6 +87,7 @@ func main() {
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(scaffoldCmd)
 	rootCmd.AddCommand(listStacksCmd)
+	rootCmd.AddCommand(diagramCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

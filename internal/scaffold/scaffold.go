@@ -871,8 +871,25 @@ locals {
   # Project name from tgs.yaml
   project_name = "%s"
   
-  # Common naming convention for resources
-  resource_prefix = local.project_name
+  # Resource group configuration by environment and region
+  resource_groups = {
+    dev = {
+      eastus2 = "rg-${local.project_name}-e2-d"
+      westus2 = "rg-${local.project_name}-w2-d"
+    }
+    test = {
+      eastus2 = "rg-${local.project_name}-e2-t"
+      westus2 = "rg-${local.project_name}-w2-t"
+    }
+    stage = {
+      eastus2 = "rg-${local.project_name}-e2-s"
+      westus2 = "rg-${local.project_name}-w2-s"
+    }
+    prod = {
+      eastus2 = "rg-${local.project_name}-e2-p"
+      westus2 = "rg-${local.project_name}-w2-p"
+    }
+  }
   
   # Common tags for all resources
   common_tags = {
@@ -898,14 +915,11 @@ locals {
 # Override these values as needed for your environment
 
 locals {
-  # Resource naming convention
-  resource_suffix = "${local.environment_name}"
-  
   # Default SKUs and tiers for various services
   app_service_sku = {
     name     = "%s"
     tier     = "Standard"
-    size     = "S1"
+    size     = "%s"
     capacity = 1
   }
   
@@ -924,7 +938,7 @@ locals {
   servicebus_sku = "Standard"
   
   # Add more environment-specific settings as needed
-}`, getDefaultSkuForEnvironment(envName))
+}`, envName, getDefaultSkuForEnvironment(envName), getDefaultSkuForEnvironment(envName))
 
 			configPath := filepath.Join(configDir, fmt.Sprintf("%s.hcl", envName))
 			if err := createFile(configPath, configContent); err != nil {
@@ -1000,7 +1014,9 @@ locals {
   # Resource naming convention with prefixes
   name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}"
   resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
-  resource_group_name = try(local.env_config.locals.resource_group_name, "rg-${local.resource_name}")
+  
+  # Get resource group name from global config
+  resource_group_name = local.global_config.locals.resource_groups[local.environment_name][local.region_name]
 }
 
 terraform {
