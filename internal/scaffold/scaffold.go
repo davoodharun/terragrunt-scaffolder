@@ -110,7 +110,7 @@ func Generate() error {
 	}
 
 	// Read TGS config
-	tgsConfig, err := readTGSConfig()
+	tgsConfig, err := ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}
@@ -770,7 +770,8 @@ func cleanupSchemaCache() {
 	}
 }
 
-func readTGSConfig() (*config.TGSConfig, error) {
+// ReadTGSConfig reads the TGS configuration from tgs.yaml
+func ReadTGSConfig() (*config.TGSConfig, error) {
 	// Get the config directory
 	configDir := getConfigDir()
 
