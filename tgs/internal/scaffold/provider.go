@@ -69,13 +69,5 @@ provider "azurerm" {
 	// Store schema in cache
 	cache.Schema = &schema
 
-	// Debug: Print available resources
-	for providerKey, provider := range schema.ProviderSchema {
-		logger.Debug("Provider: %s", providerKey)
-		for resourceKey := range provider.ResourceSchemas {
-			logger.Debug("Resource: %s", resourceKey)
-		}
-	}
-
 	return &schema, nil
 }

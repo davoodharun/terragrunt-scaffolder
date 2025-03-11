@@ -44,7 +44,7 @@ locals {
 }
 
 terraform {
-  source = "${dirname(find_in_parent_folders())}/_components/%s"
+  source = "${get_repo_root()}/.infrastructure/_components/%s"
 }
 
 %s
