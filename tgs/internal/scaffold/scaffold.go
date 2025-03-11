@@ -143,35 +143,14 @@ func Generate() error {
 }
 
 func createSubscriptionConfig(subPath, subName string, sub config.Subscription) error {
-	subscriptionConfig := fmt.Sprintf(`locals {
+	logger.Info("Creating subscription config for %s", subName)
+	subscriptionHCL := fmt.Sprintf(`locals {
   subscription_name = "%s"
-  subscription_path = "${get_repo_root()}/.infrastructure/%s"
-  remote_state = {
-    resource_group_name  = "%s"
-    storage_account_name = "%s"
-  }
-}
+  remote_state_resource_group = "%s"
+  remote_state_storage_account = "%s"
+}`, subName, sub.RemoteState.ResourceGroup, sub.RemoteState.Name)
 
-# Generate an Azure provider block
-generate "provider" {
-  path      = "provider.tf"
-  if_exists = "overwrite_terragrunt"
-  contents  = <<EOF
-provider "azurerm" {
-  features {}
-  subscription_id = var.subscription_id
-  tenant_id       = var.tenant_id
-}
-EOF
-}
-
-# Set common variables for this subscription
-inputs = {
-  subscription_id = get_env("ARM_SUBSCRIPTION_ID")
-  tenant_id       = get_env("ARM_TENANT_ID")
-}`, subName, subName, sub.RemoteState.ResourceGroup, sub.RemoteState.Name)
-
-	return createFile(filepath.Join(subPath, "subscription.hcl"), subscriptionConfig)
+	return createFile(filepath.Join(subPath, "subscription.hcl"), subscriptionHCL)
 }
 
 func createRegionConfig(regionPath, region string) error {
@@ -686,27 +665,28 @@ func createFile(path string, content string) error {
 
 func generateRootHCL(tgsConfig *config.TGSConfig) error {
 	logger.Info("Generating root.hcl configuration")
-	rootHCL := fmt.Sprintf(`# Include this in all terragrunt.hcl files
+	rootHCL := `# Include this in all terragrunt.hcl files
 locals {
   subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
   subscription_name = local.subscription_vars.locals.subscription_name
+  remote_state_resource_group = local.subscription_vars.locals.remote_state_resource_group
+  remote_state_storage_account = local.subscription_vars.locals.remote_state_storage_account
 }
 
 remote_state {
   backend = "azurerm"
   config = {
-    resource_group_name  = "%s"
-    storage_account_name = "%s"
-    container_name      = "${local.subscription_name}"
-    key                = "${path_relative_to_include()}/terraform.tfstate"
+    resource_group_name  = local.remote_state_resource_group
+    storage_account_name = local.remote_state_storage_account
+    container_name       = local.subscription_name
+    key                  = "${path_relative_to_include()}/terraform.tfstate"
   }
   generate = {
     path      = "backend.tf"
     if_exists = "overwrite_terragrunt"
   }
 }
-`, tgsConfig.Subscriptions[tgsConfig.Name].RemoteState.ResourceGroup,
-		tgsConfig.Subscriptions[tgsConfig.Name].RemoteState.Name)
+`
 
 	return createFile(filepath.Join(".infrastructure", "root.hcl"), rootHCL)
 }
