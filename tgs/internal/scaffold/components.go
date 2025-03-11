@@ -10,15 +10,24 @@ import (
 )
 
 func generateComponents(mainConfig *config.MainConfig) error {
-	logger.Section("Generating Components")
-	componentsPath := filepath.Join(".infrastructure", "_components")
-	if err := os.MkdirAll(componentsPath, 0755); err != nil {
-		return err
+	logger.Info("Generating components")
+
+	// Get the infrastructure path
+	infraPath := getInfrastructurePath()
+
+	// Create components directory
+	baseDir := filepath.Base(infraPath)
+	componentsDir := filepath.Join(baseDir, "_components")
+	if err := os.MkdirAll(componentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create components directory: %w", err)
 	}
 
+	// Generate each component
 	for compName, comp := range mainConfig.Stack.Components {
 		logger.Info("Generating component: %s", compName)
-		componentPath := filepath.Join(componentsPath, compName)
+
+		// Create component directory
+		componentPath := filepath.Join(componentsDir, compName)
 		if err := os.MkdirAll(componentPath, 0755); err != nil {
 			return err
 		}
@@ -35,6 +44,9 @@ locals {
   region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
   environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
 
+  # Infrastructure path relative to repo root
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+
   subscription_name = local.subscription_vars.locals.subscription_name
   region_name = local.region_vars.locals.region_name
   environment_name = local.environment_vars.locals.environment_name
@@ -44,7 +56,7 @@ locals {
 }
 
 terraform {
-  source = "${get_repo_root()}/.infrastructure/_components/%s"
+  source = "${get_repo_root()}/${local.infrastructure_path}/_components/%s"
 }
 
 %s
@@ -61,7 +73,7 @@ inputs = {
     Environment = local.environment_name
     Application = local.app_name
   }
-}`, compName, generateDependencyBlocks(comp.Deps))
+}`, infraPath, compName, generateDependencyBlocks(comp.Deps, infraPath))
 
 		if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
 			return err

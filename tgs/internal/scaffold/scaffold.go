@@ -65,80 +65,240 @@ func initSchemaCache() (*SchemaCache, error) {
 	return schemaCache, nil
 }
 
-func Generate() error {
-	logger.Section("Starting Scaffold Generation")
-
-	// Defer cleanup of schema cache
-	defer cleanupSchemaCache()
-
-	logger.Info("Reading configuration files")
-	tgsConfig, err := readTGSConfig()
+// Add a function to find the Git repository root
+func findGitRepoRoot() (string, error) {
+	// Start with the current working directory
+	dir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to read tgs config: %w", err)
+		return "", fmt.Errorf("failed to get current directory: %w", err)
 	}
 
+	// Walk up the directory tree looking for .git
+	for {
+		// Check if .git exists in the current directory
+		gitDir := filepath.Join(dir, ".git")
+		if _, err := os.Stat(gitDir); err == nil {
+			return dir, nil // Found the git repo root
+		}
+
+		// Move up one directory
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// We've reached the root of the filesystem without finding .git
+			return "", fmt.Errorf("no .git directory found in any parent directory")
+		}
+		dir = parent
+	}
+}
+
+// Update the function to get the infrastructure path
+func getInfrastructurePath() string {
+	// First check if the environment variable is set
+	infraPath := os.Getenv("TG_INFRASTRUCTURE_PATH")
+	if infraPath != "" {
+		logger.Info("Using infrastructure path from environment variable: %s", infraPath)
+		return infraPath
+	}
+
+	// If not set, try to determine it automatically
+	gitRoot, err := findGitRepoRoot()
+	if err != nil {
+		logger.Warning("Could not find Git repository root: %v", err)
+		logger.Info("Using default infrastructure path: tgs/.infrastructure")
+		return "tgs/.infrastructure"
+	}
+
+	// Get the current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		logger.Warning("Could not get current working directory: %v", err)
+		logger.Info("Using default infrastructure path: tgs/.infrastructure")
+		return "tgs/.infrastructure"
+	}
+
+	// Calculate the relative path from git root to current directory
+	relPath, err := filepath.Rel(gitRoot, cwd)
+	if err != nil {
+		logger.Warning("Could not determine relative path: %v", err)
+		logger.Info("Using default infrastructure path: tgs/.infrastructure")
+		return "tgs/.infrastructure"
+	}
+
+	// If we're in the root of the repo, use the default path
+	if relPath == "." {
+		logger.Info("Current directory is the repository root, using default infrastructure path: tgs/.infrastructure")
+		return "tgs/.infrastructure"
+	}
+
+	// Use the relative path + /.infrastructure
+	infraPath = relPath + "/.infrastructure"
+	logger.Info("Automatically determined infrastructure path: %s", infraPath)
+	return infraPath
+}
+
+func Generate() error {
+	logger.Info("Starting terragrunt scaffolding generation")
+
+	// Get the infrastructure path
+	infraPath := getInfrastructurePath()
+
+	// Read TGS config
+	tgsConfig, err := readTGSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to read TGS config: %w", err)
+	}
+
+	// Create base directory structure
+	baseDir := filepath.Base(infraPath)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create base directory: %w", err)
+	}
+
+	// Generate root.hcl
+	if err := generateRootHCL(tgsConfig, infraPath); err != nil {
+		return fmt.Errorf("failed to generate root.hcl: %w", err)
+	}
+
+	// Generate environment config files
+	if err := generateEnvironmentConfigs(tgsConfig, infraPath); err != nil {
+		return fmt.Errorf("failed to generate environment config files: %w", err)
+	}
+
+	// Read main config
 	mainConfig, err := readMainConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read main config: %w", err)
 	}
 
-	logger.Info("Creating base directories")
-	if err := os.MkdirAll(".infrastructure", 0755); err != nil {
-		return fmt.Errorf("failed to create .infrastructure directory: %w", err)
-	}
-	if err := os.MkdirAll(".infrastructure/_components", 0755); err != nil {
-		return fmt.Errorf("failed to create _components directory: %w", err)
+	// Create components directory
+	componentsDir := filepath.Join(baseDir, "_components")
+	if err := os.MkdirAll(componentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create components directory: %w", err)
 	}
 
-	// Generate root.hcl
-	if err := generateRootHCL(tgsConfig); err != nil {
-		return fmt.Errorf("failed to generate root.hcl: %w", err)
+	// Generate components with environment config
+	if err := generateComponentsWithEnvConfig(mainConfig, infraPath); err != nil {
+		return fmt.Errorf("failed to generate components: %w", err)
 	}
 
-	// Generate environment config files
-	if err := generateEnvironmentConfigs(tgsConfig); err != nil {
-		return fmt.Errorf("failed to generate environment config files: %w", err)
-	}
-
-	// Generate components
-	if err := generateComponentsWithEnvConfig(mainConfig); err != nil {
-		return fmt.Errorf("failed to generate component templates: %w", err)
-	}
-
-	logger.Section("Generating Infrastructure")
-	// Generate subscription structure
+	// Create subscription directories and configs
 	for subName, sub := range tgsConfig.Subscriptions {
-		logger.Info("Processing subscription: %s", subName)
-		subPath := filepath.Join(".infrastructure", subName)
+		subPath := filepath.Join(baseDir, subName)
 		if err := os.MkdirAll(subPath, 0755); err != nil {
 			return fmt.Errorf("failed to create subscription directory: %w", err)
 		}
 
-		// Create subscription-level config with remote state info
+		// Create subscription.hcl
 		if err := createSubscriptionConfig(subPath, subName, sub); err != nil {
-			return err
+			return fmt.Errorf("failed to create subscription config: %w", err)
 		}
 
-		for region := range mainConfig.Stack.Architecture.Regions {
+		// Create region directories
+		for region, components := range mainConfig.Stack.Architecture.Regions {
 			regionPath := filepath.Join(subPath, region)
 			if err := os.MkdirAll(regionPath, 0755); err != nil {
 				return fmt.Errorf("failed to create region directory: %w", err)
 			}
 
-			// Create region-level config
+			// Create region.hcl
 			if err := createRegionConfig(regionPath, region); err != nil {
-				return err
+				return fmt.Errorf("failed to create region config: %w", err)
 			}
 
+			// Create environment directories
 			for _, env := range sub.Environments {
-				if err := generateEnvironment(subName, region, env, mainConfig); err != nil {
-					return fmt.Errorf("failed to generate environment %s/%s/%s: %w", subName, region, env.Name, err)
+				envPath := filepath.Join(regionPath, env.Name)
+				if err := os.MkdirAll(envPath, 0755); err != nil {
+					return fmt.Errorf("failed to create environment directory: %w", err)
+				}
+
+				// Create environment.hcl
+				envHCL := fmt.Sprintf(`locals {
+  environment_name = "%s"
+}`, env.Name)
+				if err := createFile(filepath.Join(envPath, "environment.hcl"), envHCL); err != nil {
+					return fmt.Errorf("failed to create environment.hcl: %w", err)
+				}
+
+				// Create terragrunt.hcl
+				tgHCL := fmt.Sprintf(`include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+include "environment" {
+  path = find_in_parent_folders("environment.hcl")
+}
+
+include "region" {
+  path = find_in_parent_folders("region.hcl")
+}
+
+include "subscription" {
+  path = find_in_parent_folders("subscription.hcl")
+}
+
+locals {
+  # Infrastructure path relative to repo root
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+}`, infraPath)
+				if err := createFile(filepath.Join(envPath, "terragrunt.hcl"), tgHCL); err != nil {
+					return fmt.Errorf("failed to create terragrunt.hcl: %w", err)
+				}
+
+				// Create component directories
+				for _, comp := range components {
+					compPath := filepath.Join(envPath, comp.Component)
+					if err := os.MkdirAll(compPath, 0755); err != nil {
+						return fmt.Errorf("failed to create component directory: %w", err)
+					}
+
+					// Create terragrunt.hcl for component
+					tgCompHCL := fmt.Sprintf(`include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+locals {
+  # Infrastructure path relative to repo root
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+}
+
+include "component" {
+  path = "${get_repo_root()}/${local.infrastructure_path}/_components/%s/component.hcl"
+}`, infraPath, comp.Component)
+					if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), tgCompHCL); err != nil {
+						return fmt.Errorf("failed to create component terragrunt.hcl: %w", err)
+					}
+
+					// Create app directories if specified
+					for _, app := range comp.Apps {
+						appPath := filepath.Join(compPath, app)
+						if err := os.MkdirAll(appPath, 0755); err != nil {
+							return fmt.Errorf("failed to create app directory: %w", err)
+						}
+
+						// Create terragrunt.hcl for app
+						tgAppHCL := fmt.Sprintf(`include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+locals {
+  # Infrastructure path relative to repo root
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+}
+
+include "component" {
+  path = "${get_repo_root()}/${local.infrastructure_path}/_components/%s/component.hcl"
+}`, infraPath, comp.Component)
+						if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), tgAppHCL); err != nil {
+							return fmt.Errorf("failed to create app terragrunt.hcl: %w", err)
+						}
+					}
 				}
 			}
 		}
 	}
 
-	logger.Success("Scaffold generation completed successfully")
+	logger.Info("Terragrunt scaffolding generation complete")
 	return nil
 }
 
@@ -162,31 +322,33 @@ func createRegionConfig(regionPath, region string) error {
 	return createFile(filepath.Join(regionPath, "region.hcl"), regionConfig)
 }
 
-func generateDependencyBlocks(deps []string) string {
+// Update generateDependencyBlocks to use the infrastructure path variable
+func generateDependencyBlocks(deps []string, infraPath string) string {
 	if len(deps) == 0 {
 		return ""
 	}
 
 	var blocks []string
 	for _, dep := range deps {
-		// Parse the dependency string (e.g., "eastus2.redis" or "{region}.servicebus" or "eastus2.cosmos_db.{app}")
-		parts := strings.Split(dep, ".")
-		region := parts[0]
-		componentName := parts[1]
+		parts := strings.Split(dep, ":")
+		componentName := parts[0]
+		region := "{region}" // Default to current region
+		if len(parts) > 1 {
+			region = parts[1]
+		}
 
-		// Check if this is an app-specific dependency
-		hasAppSuffix := len(parts) > 2 && parts[2] == "{app}"
-
-		if hasAppSuffix {
+		if strings.HasPrefix(componentName, "app.") {
+			// App-specific dependency
+			appName := strings.TrimPrefix(componentName, "app.")
 			block := fmt.Sprintf(`
 dependency "%s" {
-  config_path = "${get_repo_root()}/.infrastructure/${local.subscription_name}/%s/${local.environment_name}/%s/${local.app_name}"
-}`, componentName, resolveDependencyRegion(region), componentName)
+  config_path = "${get_repo_root()}/${local.infrastructure_path}/${local.subscription_name}/%s/${local.environment_name}/%s/${local.app_name}"
+}`, componentName, resolveDependencyRegion(region), appName)
 			blocks = append(blocks, block)
 		} else {
 			block := fmt.Sprintf(`
 dependency "%s" {
-  config_path = "${get_repo_root()}/.infrastructure/${local.subscription_name}/%s/${local.environment_name}/%s"
+  config_path = "${get_repo_root()}/${local.infrastructure_path}/${local.subscription_name}/%s/${local.environment_name}/%s"
 }`, componentName, resolveDependencyRegion(region), componentName)
 			blocks = append(blocks, block)
 		}
@@ -660,17 +822,33 @@ func readMainConfig() (*config.MainConfig, error) {
 }
 
 func createFile(path string, content string) error {
+	// Ensure the parent directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
-func generateRootHCL(tgsConfig *config.TGSConfig) error {
+func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
 	logger.Info("Generating root.hcl configuration")
-	rootHCL := `# Include this in all terragrunt.hcl files
+
+	// Ensure the .infrastructure directory exists
+	baseDir := filepath.Base(infraPath)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create infrastructure directory: %w", err)
+	}
+
+	rootHCL := fmt.Sprintf(`# Include this in all terragrunt.hcl files
 locals {
   subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
   subscription_name = local.subscription_vars.locals.subscription_name
   remote_state_resource_group = local.subscription_vars.locals.remote_state_resource_group
   remote_state_storage_account = local.subscription_vars.locals.remote_state_storage_account
+  
+  # Infrastructure path relative to repo root
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
 }
 
 remote_state {
@@ -686,17 +864,23 @@ remote_state {
     if_exists = "overwrite_terragrunt"
   }
 }
-`
+`, infraPath)
 
-	return createFile(filepath.Join(".infrastructure", "root.hcl"), rootHCL)
+	return createFile(filepath.Join(baseDir, "root.hcl"), rootHCL)
 }
 
 // Add this function to generate environment config files
-func generateEnvironmentConfigs(tgsConfig *config.TGSConfig) error {
+func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) error {
 	logger.Info("Generating environment configuration files")
 
+	// Ensure the .infrastructure directory exists first
+	baseDir := filepath.Base(infraPath)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create infrastructure directory: %w", err)
+	}
+
 	// Create config directory
-	configDir := filepath.Join(".infrastructure", "config")
+	configDir := filepath.Join(baseDir, "config")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
@@ -770,12 +954,13 @@ func getDefaultSkuForEnvironment(env string) string {
 	}
 }
 
-// Update the component.hcl template to use environment config files
-func generateComponentsWithEnvConfig(mainConfig *config.MainConfig) error {
-	logger.Info("Generating components")
+// Update the component.hcl template to use environment config files and infrastructure path
+func generateComponentsWithEnvConfig(mainConfig *config.MainConfig, infraPath string) error {
+	logger.Info("Generating components with environment config")
 
 	// Create components directory
-	componentsDir := filepath.Join(".infrastructure", "_components")
+	baseDir := filepath.Base(infraPath)
+	componentsDir := filepath.Join(baseDir, "_components")
 	if err := os.MkdirAll(componentsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create components directory: %w", err)
 	}
@@ -797,8 +982,11 @@ locals {
   region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
   environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
   
+  # Infrastructure path relative to repo root
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+  
   # Load environment-specific configuration
-  env_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/${local.environment_vars.locals.environment_name}.hcl")
+  env_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/${local.environment_vars.locals.environment_name}.hcl")
 
   subscription_name = local.subscription_vars.locals.subscription_name
   region_name = local.region_vars.locals.region_name
@@ -809,7 +997,7 @@ locals {
 }
 
 terraform {
-  source = "${get_repo_root()}/.infrastructure/_components/%s"
+  source = "${get_repo_root()}/${local.infrastructure_path}/_components/%s"
 }
 
 %s
@@ -832,7 +1020,7 @@ inputs = {
   
   # Include environment-specific configurations based on component type
   %s
-}`, compName, generateDependencyBlocks(comp.Deps), generateEnvConfigInputs(compName))
+}`, infraPath, compName, generateDependencyBlocks(comp.Deps, infraPath), generateEnvConfigInputs(compName))
 
 		if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
 			return err
