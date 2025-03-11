@@ -1,9 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# Code Editor settings
-.vscode/
-.idea/
-
 # TGS specific folders
 .tgs/
 .infrastructure/
@@ -36,19 +30,13 @@ terraform.rc
 # Terragrunt cache directories
 **/.terragrunt-cache/*
 
-# Terragrunt lock files
-.terraform.lock.hcl
+# Ignore git directories
+.git/
+.github/
 
-# Ignore generated backend files
-backend.tf
-
-# Ignore provider generated files
-.plugins/
-.plugin-cache/
-
-# Ignore temporary files
-*.tmp
-*.bak
+# Ignore IDE and editor files
+.vscode/
+.idea/
 *.swp
 *~
 
@@ -56,11 +44,12 @@ backend.tf
 .DS_Store
 Thumbs.db
 
-# Ignore binary files
-*.exe
-*.dll
-*.so
-*.dylib
+# Ignore documentation
+*.md
+docs/
 
-# Ignore log files
-*.log
+# Ignore test files
+*_test.go
+*_test.tf
+test/
+tests/

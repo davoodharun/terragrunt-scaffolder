@@ -804,20 +804,26 @@ func cleanupSchemaCache() {
 }
 
 func readTGSConfig() (*config.TGSConfig, error) {
-	// Get the executable's directory
-	execPath, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get executable path: %w", err)
-	}
-	execDir := filepath.Dir(execPath)
+	// Get the config directory
+	configDir := getConfigDir()
 
-	// Read from the tgs directory
-	data, err := os.ReadFile(filepath.Join(execDir, "tgs.yaml"))
+	// Try to read from the .tgs directory first
+	configPath := filepath.Join(configDir, "tgs.yaml")
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		// Try current directory as fallback
-		data, err = os.ReadFile("tgs.yaml")
+		// Try the executable's directory
+		execPath, err := os.Executable()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get executable path: %w", err)
+		}
+		execDir := filepath.Dir(execPath)
+		data, err = os.ReadFile(filepath.Join(execDir, "tgs.yaml"))
+		if err != nil {
+			// Try current directory as fallback
+			data, err = os.ReadFile("tgs.yaml")
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -836,26 +842,32 @@ func readTGSConfig() (*config.TGSConfig, error) {
 }
 
 func readMainConfig() (*config.MainConfig, error) {
-	// Get the executable's directory
-	execPath, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get executable path: %w", err)
-	}
-	execDir := filepath.Dir(execPath)
+	// Get the stacks directory
+	stacksDir := getStacksDir()
 
-	// Read from the tgs directory
-	data, err := os.ReadFile(filepath.Join(execDir, "main.yaml"))
+	// Try to read from the .tgs/stacks directory first
+	stackPath := filepath.Join(stacksDir, "main.yaml")
+	data, err := os.ReadFile(stackPath)
 	if err != nil {
-		// Try current directory as fallback
-		data, err = os.ReadFile("main.yaml")
+		// Try the executable's directory
+		execPath, err := os.Executable()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get executable path: %w", err)
+		}
+		execDir := filepath.Dir(execPath)
+		data, err = os.ReadFile(filepath.Join(execDir, "main.yaml"))
+		if err != nil {
+			// Try current directory as fallback
+			data, err = os.ReadFile("main.yaml")
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	var cfg config.MainConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal main.yaml: %w", err)
+		return nil, err
 	}
 
 	return &cfg, nil
@@ -1139,4 +1151,14 @@ remote_state {
 `, infraPath)
 
 	return createFile(filepath.Join(baseDir, "root.hcl"), rootHCL)
+}
+
+// getConfigDir returns the path to the .tgs config directory
+func getConfigDir() string {
+	return ".tgs"
+}
+
+// getStacksDir returns the path to the .tgs/stacks directory
+func getStacksDir() string {
+	return filepath.Join(getConfigDir(), "stacks")
 }

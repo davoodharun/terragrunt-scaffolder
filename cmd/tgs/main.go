@@ -51,6 +51,15 @@ func main() {
 		},
 	}
 
+	// List stacks command
+	listStacksCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List available stacks",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return template.ListStacks()
+		},
+	}
+
 	// Generate scaffold command
 	scaffoldCmd := &cobra.Command{
 		Use:   "generate",
@@ -67,6 +76,7 @@ func main() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(scaffoldCmd)
+	rootCmd.AddCommand(listStacksCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
