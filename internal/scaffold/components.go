@@ -43,12 +43,9 @@ locals {
   subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
   region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
   environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
-
-  # Infrastructure path relative to repo root
-  infrastructure_path = ".infrastructure"
   
   # Load global configuration
-  global_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/global.hcl")
+  global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
   
   # Common variables
   project_name = local.global_config.locals.project_name
@@ -68,7 +65,7 @@ locals {
 }
 
 terraform {
-  source = "${get_repo_root()}/${local.infrastructure_path}/_components/%s"
+  source = "${get_repo_root()}/.infrastructure/_components/%s"
 }
 
 %s

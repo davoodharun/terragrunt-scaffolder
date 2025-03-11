@@ -192,31 +192,6 @@ func Generate() error {
 					return fmt.Errorf("failed to create environment.hcl: %w", err)
 				}
 
-				// Create terragrunt.hcl
-				tgHCL := `include "root" {
-  path = find_in_parent_folders("root.hcl")
-}
-
-include "environment" {
-  path = find_in_parent_folders("environment.hcl")
-}
-
-include "region" {
-  path = find_in_parent_folders("region.hcl")
-}
-
-include "subscription" {
-  path = find_in_parent_folders("subscription.hcl")
-}
-
-locals {
-  # Infrastructure path relative to repo root
-  infrastructure_path = ".infrastructure"
-}`
-				if err := createFile(filepath.Join(envPath, "terragrunt.hcl"), tgHCL); err != nil {
-					return fmt.Errorf("failed to create terragrunt.hcl: %w", err)
-				}
-
 				// Create component directories
 				for _, comp := range components {
 					compPath := filepath.Join(envPath, comp.Component)
@@ -224,45 +199,37 @@ locals {
 						return fmt.Errorf("failed to create component directory: %w", err)
 					}
 
-					// Create terragrunt.hcl for component
-					tgCompHCL := fmt.Sprintf(`include "root" {
+					if len(comp.Apps) > 0 {
+						// Create app directories if specified
+						for _, app := range comp.Apps {
+							appPath := filepath.Join(compPath, app)
+							if err := os.MkdirAll(appPath, 0755); err != nil {
+								return fmt.Errorf("failed to create app directory: %w", err)
+							}
+
+							// Create terragrunt.hcl for app
+							tgAppHCL := fmt.Sprintf(`include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-locals {
-  # Infrastructure path relative to repo root
-  infrastructure_path = ".infrastructure"
-}
-
 include "component" {
-  path = "${get_repo_root()}/${local.infrastructure_path}/_components/%s/component.hcl"
+  path = "${get_repo_root()}/.infrastructure/_components/%s/component.hcl"
 }`, comp.Component)
-					if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), tgCompHCL); err != nil {
-						return fmt.Errorf("failed to create component terragrunt.hcl: %w", err)
-					}
-
-					// Create app directories if specified
-					for _, app := range comp.Apps {
-						appPath := filepath.Join(compPath, app)
-						if err := os.MkdirAll(appPath, 0755); err != nil {
-							return fmt.Errorf("failed to create app directory: %w", err)
+							if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), tgAppHCL); err != nil {
+								return fmt.Errorf("failed to create app terragrunt.hcl: %w", err)
+							}
 						}
-
-						// Create terragrunt.hcl for app
-						tgAppHCL := fmt.Sprintf(`include "root" {
+					} else {
+						// Only create terragrunt.hcl for components without apps
+						tgCompHCL := fmt.Sprintf(`include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-locals {
-  # Infrastructure path relative to repo root
-  infrastructure_path = ".infrastructure"
-}
-
 include "component" {
-  path = "${get_repo_root()}/${local.infrastructure_path}/_components/%s/component.hcl"
+  path = "${get_repo_root()}/.infrastructure/_components/%s/component.hcl"
 }`, comp.Component)
-						if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), tgAppHCL); err != nil {
-							return fmt.Errorf("failed to create app terragrunt.hcl: %w", err)
+						if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), tgCompHCL); err != nil {
+							return fmt.Errorf("failed to create component terragrunt.hcl: %w", err)
 						}
 					}
 				}
@@ -1015,12 +982,9 @@ locals {
   region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
   environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
   
-  # Infrastructure path relative to repo root
-  infrastructure_path = ".infrastructure"
-  
   # Load global and environment-specific configurations
-  global_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/global.hcl")
-  env_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/${local.environment_vars.locals.environment_name}.hcl")
+  global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
+  env_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/${local.environment_vars.locals.environment_name}.hcl")
 
   # Common variables
   project_name = local.global_config.locals.project_name
@@ -1040,7 +1004,7 @@ locals {
 }
 
 terraform {
-  source = "${get_repo_root()}/${local.infrastructure_path}/_components/%s"
+  source = "${get_repo_root()}/.infrastructure/_components/%s"
 }
 
 %s
@@ -1061,10 +1025,10 @@ inputs = {
       Region = local.region_name
     }
   )
-  
+
   # Include environment-specific configurations based on component type
-  %s
-}`, infraPath, compName, generateDependencyBlocks(comp.Deps, infraPath), generateEnvConfigInputs(compName))
+%s
+}`, compName, generateDependencyBlocks(comp.Deps, infraPath), generateEnvConfigInputs(compName))
 
 		if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
 			return err
@@ -1121,10 +1085,10 @@ func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
 		return fmt.Errorf("failed to create infrastructure directory: %w", err)
 	}
 
-	rootHCL := fmt.Sprintf(`# Include this in all terragrunt.hcl files
+	rootHCL := `# Include this in all terragrunt.hcl files
 locals {
   subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
-  global_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/global.hcl")
+  global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
   
   subscription_name = local.subscription_vars.locals.subscription_name
   project_name = local.global_config.locals.project_name
@@ -1147,8 +1111,7 @@ remote_state {
     path      = "backend.tf"
     if_exists = "overwrite_terragrunt"
   }
-}
-`, infraPath)
+}`
 
 	return createFile(filepath.Join(baseDir, "root.hcl"), rootHCL)
 }

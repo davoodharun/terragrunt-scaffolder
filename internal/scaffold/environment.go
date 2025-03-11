@@ -18,11 +18,14 @@ func generateEnvironment(subName, region string, env config.Environment, mainCon
 		return fmt.Errorf("failed to create environment directory: %w", err)
 	}
 
+	// Get environment prefix
+	envPrefix := getEnvironmentPrefix(env.Name)
+
 	// Create environment-level config
 	envConfig := fmt.Sprintf(`locals {
   environment_name = "%s"
-  environment_path = "${get_parent_terragrunt_dir()}"
-}`, env.Name)
+  environment_prefix = "%s"
+}`, env.Name, envPrefix)
 
 	if err := createFile(filepath.Join(basePath, "environment.hcl"), envConfig); err != nil {
 		return err

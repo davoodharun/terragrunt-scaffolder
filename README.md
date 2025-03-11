@@ -151,48 +151,6 @@ stack:
             - web
 ```
 
-## Ignore Files
-
-When initializing a project with `tgs init`, the following ignore files are created in the project root directory:
-
-### .gitignore
-
-The `.gitignore` file is configured to exclude the following from version control:
-- `.tgs/` and `.infrastructure/` directories
-- Local `.terraform` directories
-- `.tfstate` files and crash logs
-- Sensitive `.tfvars` files
-- Override files and CLI configuration files
-- Terragrunt cache directories and lock files
-- Generated backend files
-- Provider generated files
-- Temporary files, OS-specific files, binary files, and log files
-
-### .terraformignore
-
-The `.terraformignore` file specifies which files Terraform should ignore when uploading configurations to Terraform Cloud or Enterprise. It excludes:
-- `.tgs/` and `.infrastructure/` directories
-- Local `.terraform` directories
-- `.tfstate` files and crash logs
-- Sensitive `.tfvars` files
-- Override files and CLI configuration files
-- Terragrunt cache directories
-- Git directories and IDE/editor files
-- Documentation and test files
-
-### .terragruntignore
-
-The `.terragruntignore` file specifies which files Terragrunt should ignore. It excludes:
-- `.tgs/` and `.infrastructure/` directories
-- Local `.terraform` directories
-- `.tfstate` files and crash logs
-- Sensitive `.tfvars` files
-- Override files and CLI configuration files
-- Terragrunt cache directories
-- Git directories and IDE/editor files
-- Documentation and test files
-- Generated backend files
-
 ## Dependency Notation
 
 The `deps` field in the component configuration uses a special notation to define dependencies between components. This notation follows the format:
@@ -277,7 +235,7 @@ See the CLI commands section for details on how to use the tool.
 ## CLI Commands
 
 ```
-tgs init                  # Initialize a new project with tgs.yaml, main.yaml, and ignore files (.gitignore, .terraformignore, .terragruntignore)
+tgs init                  # Initialize a new project with tgs.yaml and main.yaml in .tgs directory
 tgs create stack [name]   # Create a new stack configuration in .tgs/stacks directory
 tgs list                  # List available stacks in .tgs/stacks directory
 tgs generate              # Generate Terragrunt configuration based on tgs.yaml and main.yaml
@@ -289,7 +247,7 @@ tgs generate              # Generate Terragrunt configuration based on tgs.yaml 
    ```
    tgs init
    ```
-   This creates the `.tgs` directory with a default `tgs.yaml` file and a default `main.yaml` stack in the `.tgs/stacks` directory. It also creates `.gitignore`, `.terraformignore`, and `.terragruntignore` files in the project root directory.
+   This creates the `.tgs` directory with a default `tgs.yaml` file and a default `main.yaml` stack in the `.tgs/stacks` directory.
 
 2. **Create additional stacks** (optional):
    ```
