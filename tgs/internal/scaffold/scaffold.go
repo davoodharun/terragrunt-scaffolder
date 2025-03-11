@@ -207,21 +207,26 @@ func Generate() error {
 
 			// Create environment directories
 			for _, env := range sub.Environments {
-				envPath := filepath.Join(regionPath, env.Name)
+				envName := env.Name
+				envPath := filepath.Join(regionPath, envName)
 				if err := os.MkdirAll(envPath, 0755); err != nil {
 					return fmt.Errorf("failed to create environment directory: %w", err)
 				}
 
+				// Get environment prefix
+				envPrefix := getEnvironmentPrefix(envName)
+
 				// Create environment.hcl
 				envHCL := fmt.Sprintf(`locals {
   environment_name = "%s"
-}`, env.Name)
+  environment_prefix = "%s"
+}`, envName, envPrefix)
 				if err := createFile(filepath.Join(envPath, "environment.hcl"), envHCL); err != nil {
 					return fmt.Errorf("failed to create environment.hcl: %w", err)
 				}
 
 				// Create terragrunt.hcl
-				tgHCL := fmt.Sprintf(`include "root" {
+				tgHCL := `include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
@@ -239,8 +244,8 @@ include "subscription" {
 
 locals {
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
-}`, infraPath)
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "tgs/.infrastructure")
+}`
 				if err := createFile(filepath.Join(envPath, "terragrunt.hcl"), tgHCL); err != nil {
 					return fmt.Errorf("failed to create terragrunt.hcl: %w", err)
 				}
@@ -259,12 +264,12 @@ locals {
 
 locals {
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "tgs/.infrastructure")
 }
 
 include "component" {
   path = "${get_repo_root()}/${local.infrastructure_path}/_components/%s/component.hcl"
-}`, infraPath, comp.Component)
+}`, comp.Component)
 					if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), tgCompHCL); err != nil {
 						return fmt.Errorf("failed to create component terragrunt.hcl: %w", err)
 					}
@@ -283,12 +288,12 @@ include "component" {
 
 locals {
   # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "tgs/.infrastructure")
 }
 
 include "component" {
   path = "${get_repo_root()}/${local.infrastructure_path}/_components/%s/component.hcl"
-}`, infraPath, comp.Component)
+}`, comp.Component)
 						if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), tgAppHCL); err != nil {
 							return fmt.Errorf("failed to create app terragrunt.hcl: %w", err)
 						}
@@ -314,12 +319,70 @@ func createSubscriptionConfig(subPath, subName string, sub config.Subscription) 
 }
 
 func createRegionConfig(regionPath, region string) error {
-	regionConfig := fmt.Sprintf(`locals {
-  region_name = "%s"
-  region_path = "${get_parent_terragrunt_dir()}"
-}`, region)
+	logger.Info("Creating region config for %s", region)
 
-	return createFile(filepath.Join(regionPath, "region.hcl"), regionConfig)
+	// Determine region prefix (single letter)
+	regionPrefix := getRegionPrefix(region)
+
+	regionHCL := fmt.Sprintf(`locals {
+  region_name = "%s"
+  region_prefix = "%s"
+}`, region, regionPrefix)
+
+	return createFile(filepath.Join(regionPath, "region.hcl"), regionHCL)
+}
+
+// Helper function to get a single letter prefix for a region
+func getRegionPrefix(region string) string {
+	regionPrefixMap := map[string]string{
+		"eastus":        "E",
+		"eastus2":       "E2",
+		"westus":        "W",
+		"westus2":       "W2",
+		"centralus":     "C",
+		"northeurope":   "NE",
+		"westeurope":    "WE",
+		"uksouth":       "UKS",
+		"ukwest":        "UKW",
+		"southeastasia": "SEA",
+		"eastasia":      "EA",
+	}
+
+	// Check if we have a predefined prefix
+	if prefix, ok := regionPrefixMap[region]; ok {
+		return prefix
+	}
+
+	// Default to first letter uppercase if not in map
+	if len(region) > 0 {
+		return strings.ToUpper(region[0:1])
+	}
+
+	return "R" // Default fallback
+}
+
+// Helper function to get a single letter prefix for an environment
+func getEnvironmentPrefix(env string) string {
+	envPrefixMap := map[string]string{
+		"dev":   "D",
+		"test":  "T",
+		"stage": "S",
+		"prod":  "P",
+		"qa":    "Q",
+		"uat":   "U",
+	}
+
+	// Check if we have a predefined prefix
+	if prefix, ok := envPrefixMap[env]; ok {
+		return prefix
+	}
+
+	// Default to first letter uppercase if not in map
+	if len(env) > 0 {
+		return strings.ToUpper(env[0:1])
+	}
+
+	return "E" // Default fallback
 }
 
 // Update generateDependencyBlocks to use the infrastructure path variable
@@ -476,7 +539,19 @@ resource "%s" "this" {
       tags["Environment"]
     ]
   }
-}`, comp.Source, strings.Join(allAttributes, "\n"), strings.Join(blocks, "\n"))
+}
+
+# Output the resource ID and name for reference by other resources
+output "id" {
+  value = resource.%s.this.id
+  description = "The ID of the %s"
+}
+
+output "name" {
+  value = resource.%s.this.name
+  description = "The name of the %s"
+}`, comp.Source, strings.Join(allAttributes, "\n"), strings.Join(blocks, "\n"),
+		comp.Source, comp.Source, comp.Source, comp.Source)
 }
 
 func shouldSkipVariable(name string) bool {
@@ -526,27 +601,6 @@ variable "tags" {
   type        = map(string)
   description = "Tags to apply to the resource"
   default     = {}
-}
-
-variable "subscription_name" {
-  type        = string
-  description = "The name of the subscription"
-}
-
-variable "region_name" {
-  type        = string
-  description = "The name of the region"
-}
-
-variable "environment_name" {
-  type        = string
-  description = "The name of the environment"
-}
-
-variable "app_name" {
-  type        = string
-  description = "The name of the application"
-  default     = ""
 }`}
 
 	// Try different provider keys
@@ -831,45 +885,6 @@ func createFile(path string, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
-func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
-	logger.Info("Generating root.hcl configuration")
-
-	// Ensure the .infrastructure directory exists
-	baseDir := filepath.Base(infraPath)
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return fmt.Errorf("failed to create infrastructure directory: %w", err)
-	}
-
-	rootHCL := fmt.Sprintf(`# Include this in all terragrunt.hcl files
-locals {
-  subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
-  subscription_name = local.subscription_vars.locals.subscription_name
-  remote_state_resource_group = local.subscription_vars.locals.remote_state_resource_group
-  remote_state_storage_account = local.subscription_vars.locals.remote_state_storage_account
-  
-  # Infrastructure path relative to repo root
-  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
-}
-
-remote_state {
-  backend = "azurerm"
-  config = {
-    resource_group_name  = local.remote_state_resource_group
-    storage_account_name = local.remote_state_storage_account
-    container_name       = local.subscription_name
-    key                  = "${path_relative_to_include()}/terraform.tfstate"
-  }
-  generate = {
-    path      = "backend.tf"
-    if_exists = "overwrite_terragrunt"
-  }
-}
-`, infraPath)
-
-	return createFile(filepath.Join(baseDir, "root.hcl"), rootHCL)
-}
-
-// Add this function to generate environment config files
 func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) error {
 	logger.Info("Generating environment configuration files")
 
@@ -885,6 +900,29 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
+	// Generate global.hcl with the name property from tgs.yaml
+	globalHCL := fmt.Sprintf(`# Global configuration values
+locals {
+  # Project name from tgs.yaml
+  project_name = "%s"
+  
+  # Common naming convention for resources
+  resource_prefix = local.project_name
+  
+  # Common tags for all resources
+  common_tags = {
+    Project = local.project_name
+    ManagedBy = "Terragrunt"
+  }
+}`, tgsConfig.Name)
+
+	globalPath := filepath.Join(configDir, "global.hcl")
+	if err := createFile(globalPath, globalHCL); err != nil {
+		return fmt.Errorf("failed to create global config file: %w", err)
+	}
+
+	logger.Info("Generated global config file: %s", globalPath)
+
 	// Generate a config file for each environment in each subscription
 	for _, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
@@ -895,11 +933,8 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 # Override these values as needed for your environment
 
 locals {
-  # Resource group naming convention
-  resource_group_prefix = "rg"
-  
-  # Common settings
-  resource_group_name = "${local.resource_group_prefix}-${local.app_name}-${local.environment_name}"
+  # Resource naming convention
+  resource_suffix = "${local.environment_name}"
   
   # Default SKUs and tiers for various services
   app_service_sku = {
@@ -985,15 +1020,25 @@ locals {
   # Infrastructure path relative to repo root
   infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
   
-  # Load environment-specific configuration
+  # Load global and environment-specific configurations
+  global_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/global.hcl")
   env_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/${local.environment_vars.locals.environment_name}.hcl")
 
+  # Common variables
+  project_name = local.global_config.locals.project_name
   subscription_name = local.subscription_vars.locals.subscription_name
   region_name = local.region_vars.locals.region_name
+  region_prefix = local.region_vars.locals.region_prefix
   environment_name = local.environment_vars.locals.environment_name
+  environment_prefix = local.environment_vars.locals.environment_prefix
   
   # Get the directory name as the app name, defaulting to empty string if at component root
   app_name = try(basename(dirname(get_terragrunt_dir())), basename(get_terragrunt_dir()), "")
+  
+  # Resource naming convention with prefixes
+  name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}"
+  resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
+  resource_group_name = try(local.env_config.locals.resource_group_name, "rg-${local.resource_name}")
 }
 
 terraform {
@@ -1003,20 +1048,21 @@ terraform {
 %s
 
 inputs = {
-  subscription_name = local.subscription_name
-  region_name = local.region_name
-  environment_name = local.environment_vars.locals.environment_name
-  app_name = local.app_name
-  name = coalesce(try("${local.app_name}-${local.environment_name}", ""), local.environment_name)
-  
-  # Use environment-specific resource group name from config
-  resource_group_name = try(local.env_config.locals.resource_group_name, "rg-${local.app_name}-${local.environment_name}")
-  
+  # Resource identification
+  name = local.resource_name
+  resource_group_name = local.resource_group_name
   location = local.region_name
-  tags = {
-    Environment = local.environment_name
-    Application = local.app_name
-  }
+  
+  # Tags with context information embedded
+  tags = merge(
+    try(local.global_config.locals.common_tags, {}),
+    {
+      Environment = local.environment_name
+      Application = local.app_name
+      Project = local.project_name
+      Region = local.region_name
+    }
+  )
   
   # Include environment-specific configurations based on component type
   %s
@@ -1066,4 +1112,45 @@ sku = try(local.env_config.locals.servicebus_sku, "Standard")`
 	default:
 		return "# No component-specific settings"
 	}
+}
+
+func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
+	logger.Info("Generating root.hcl configuration")
+
+	// Ensure the .infrastructure directory exists
+	baseDir := filepath.Base(infraPath)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create infrastructure directory: %w", err)
+	}
+
+	rootHCL := fmt.Sprintf(`# Include this in all terragrunt.hcl files
+locals {
+  subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
+  global_config = read_terragrunt_config("${get_repo_root()}/${local.infrastructure_path}/config/global.hcl")
+  
+  subscription_name = local.subscription_vars.locals.subscription_name
+  project_name = local.global_config.locals.project_name
+  remote_state_resource_group = local.subscription_vars.locals.remote_state_resource_group
+  remote_state_storage_account = local.subscription_vars.locals.remote_state_storage_account
+  
+  # Infrastructure path relative to repo root
+  infrastructure_path = get_env("TG_INFRASTRUCTURE_PATH", "%s")
+}
+
+remote_state {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = local.remote_state_resource_group
+    storage_account_name = local.remote_state_storage_account
+    container_name       = local.project_name
+    key                  = "${path_relative_to_include()}/terraform.tfstate"
+  }
+  generate = {
+    path      = "backend.tf"
+    if_exists = "overwrite_terragrunt"
+  }
+}
+`, infraPath)
+
+	return createFile(filepath.Join(baseDir, "root.hcl"), rootHCL)
 }
