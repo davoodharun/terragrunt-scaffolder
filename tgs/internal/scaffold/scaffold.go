@@ -578,10 +578,8 @@ func generateProviderTF(comp config.Component) string {
 }
 
 provider "azurerm" {
-  features {}
-
-  subscription_id = dependency.subscription.outputs.subscription_id
-  tenant_id       = dependency.subscription.outputs.tenant_id
+  	features {}
+	resource_provider_registrations = "none"
 }
 
 data "azurerm_client_config" "current" {}
@@ -706,15 +704,6 @@ remote_state {
     path      = "backend.tf"
     if_exists = "overwrite_terragrunt"
   }
-}
-
-# Generate providers.tf file with default provider configurations
-
-provider "azurerm" {
-  features {}
-  resource_provider_registrations = "none"
-}
-EOF
 }
 `, tgsConfig.Subscriptions[tgsConfig.Name].RemoteState.ResourceGroup,
 		tgsConfig.Subscriptions[tgsConfig.Name].RemoteState.Name)
