@@ -20,6 +20,12 @@ var azureSprites = map[string]string{
 	"servicebus":     "AzureServiceBus",
 	"keyvault":       "AzureKeyVault",
 	"storage":        "AzureStorage",
+	"functionapp":    "AzureFunction",
+	"apim":           "AzureAPIManagement",
+	"sql_server":     "AzureSQLServer",
+	"sql_database":   "AzureSQLDatabase",
+	"eventhub":       "AzureEventHub",
+	"loganalytics":   "AzureLogAnalytics",
 }
 
 // generatePlantUMLDiagram generates a PlantUML diagram for a specific stack and environment
@@ -52,7 +58,7 @@ func generatePlantUMLDiagram(stackName string, tgsConfig *config.TGSConfig, envN
 	diagram.WriteString("skinparam rectangle {\n")
 	diagram.WriteString("  BackgroundColor<<region>> Azure\n")
 	diagram.WriteString("  BorderColor<<region>> Navy\n")
-	diagram.WriteString("  FontColor<<region>> White\n")
+	diagram.WriteString("  FontColor<<region>> Black\n")
 	diagram.WriteString("}\n\n")
 
 	// Create a map to track deployable resources and their dependencies
@@ -131,6 +137,40 @@ func generatePlantUMLDiagram(stackName string, tgsConfig *config.TGSConfig, envN
 					resourceId,
 					strings.Title(strings.ReplaceAll(displayName, "_", " ")), // Capitalize words
 					region))
+
+				// Get component configuration
+				component := mainConfig.Stack.Components[res.component]
+				resourceType := getResourceTypeAbbreviation(res.component)
+
+				// Add note with resource details
+				diagram.WriteString(fmt.Sprintf("  note right of \"%s\"\n", resourceId))
+				diagram.WriteString(fmt.Sprintf("    Resource Type: %s\n", component.Source))
+				diagram.WriteString(fmt.Sprintf("    Provider Version: %s\n", component.Version))
+
+				// Get region and environment prefixes for example
+				regionPrefix := getRegionPrefix(res.region)
+				envPrefix := getEnvironmentPrefix(envName)
+
+				if res.app != "" {
+					// Resource with app
+					diagram.WriteString("    Naming Pattern: {project}-{region}{env}-{resourcetype}-{app}\n")
+					diagram.WriteString(fmt.Sprintf("    Example: %s-%s%s-%s-%s\n",
+						tgsConfig.Name,
+						regionPrefix,
+						envPrefix,
+						resourceType,
+						res.app))
+				} else {
+					// Resource without app
+					diagram.WriteString("    Naming Pattern: {project}-{region}{env}-{resourcetype}\n")
+					diagram.WriteString(fmt.Sprintf("    Example: %s-%s%s-%s\n",
+						tgsConfig.Name,
+						regionPrefix,
+						envPrefix,
+						resourceType))
+				}
+
+				diagram.WriteString("  end note\n\n")
 			}
 		}
 		diagram.WriteString("}\n\n")
@@ -195,12 +235,75 @@ func generatePlantUMLDiagram(stackName string, tgsConfig *config.TGSConfig, envN
 	return nil
 }
 
-// Helper function to generate a consistent component ID
-func getComponentId(region, component string) string {
-	return fmt.Sprintf("%s_%s", region, component)
+// Helper function to get region prefix
+func getRegionPrefix(region string) string {
+	regionPrefixMap := map[string]string{
+		"eastus":        "E",
+		"eastus2":       "E2",
+		"westus":        "W",
+		"westus2":       "W2",
+		"centralus":     "C",
+		"northeurope":   "NE",
+		"westeurope":    "WE",
+		"uksouth":       "UKS",
+		"ukwest":        "UKW",
+		"southeastasia": "SEA",
+		"eastasia":      "EA",
+	}
+
+	if prefix, ok := regionPrefixMap[region]; ok {
+		return prefix
+	}
+	return strings.ToUpper(region[0:1])
 }
 
-// Helper function to generate a consistent app ID
-func getAppId(region, component, app string) string {
-	return fmt.Sprintf("%s_%s_%s", region, component, app)
+// Helper function to get environment prefix
+func getEnvironmentPrefix(env string) string {
+	envPrefixMap := map[string]string{
+		"dev":   "D",
+		"test":  "T",
+		"stage": "S",
+		"prod":  "P",
+		"qa":    "Q",
+		"uat":   "U",
+	}
+
+	if prefix, ok := envPrefixMap[env]; ok {
+		return prefix
+	}
+	return strings.ToUpper(env[0:1])
+}
+
+// Helper function to get resource type abbreviation
+func getResourceTypeAbbreviation(resourceType string) string {
+	resourceAbbreviations := map[string]string{
+		"serviceplan":    "svcpln",
+		"appservice":     "appsvc",
+		"functionapp":    "fncapp",
+		"rediscache":     "cache",
+		"keyvault":       "kv",
+		"servicebus":     "sbus",
+		"cosmos_account": "cosmos",
+		"cosmos_db":      "cdb",
+		"apim":           "apim",
+		"storage":        "st",
+		"sql_server":     "sql",
+		"sql_database":   "sqldb",
+		"eventhub":       "evhub",
+		"loganalytics":   "log",
+	}
+
+	if abbr, ok := resourceAbbreviations[resourceType]; ok {
+		return abbr
+	}
+
+	if len(resourceType) > 3 {
+		return resourceType[:3]
+	}
+	return resourceType
+}
+
+// Helper function to sanitize IDs for PlantUML
+func sanitizeId(id string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(id, "-", "_"), ".", "_")
 }

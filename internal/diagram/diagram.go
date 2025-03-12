@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
@@ -21,35 +20,40 @@ func GenerateDiagram() error {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}
 
-	// Get all stack files
-	stacksDir := filepath.Join(".tgs", "stacks")
-	entries, err := os.ReadDir(stacksDir)
-	if err != nil {
-		return fmt.Errorf("failed to read stacks directory: %w", err)
-	}
-
-	// Create diagrams directory if it doesn't exist
-	if err := os.MkdirAll("diagrams", 0755); err != nil {
+	// Create diagrams directory in .infrastructure if it doesn't exist
+	outputDir := filepath.Join(".infrastructure", "diagrams")
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create diagrams directory: %w", err)
 	}
 
-	// Generate diagram for each stack
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".yaml") {
-			stackName := strings.TrimSuffix(entry.Name(), ".yaml")
+	// Track which stacks we've processed to avoid duplicates
+	processedStacks := make(map[string]bool)
 
-			// Generate diagrams for each environment
-			for _, sub := range tgsConfig.Subscriptions {
-				for _, env := range sub.Environments {
-					if err := generatePlantUMLDiagram(stackName, tgsConfig, env.Name); err != nil {
-						return fmt.Errorf("failed to generate diagram for stack %s, environment %s: %w", stackName, env.Name, err)
-					}
-				}
+	// Generate diagrams for each environment using its specified stack
+	for _, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			// Use the stack specified in the environment config, default to "main" if not specified
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
 			}
+
+			// Skip if we've already processed this stack for this environment
+			key := fmt.Sprintf("%s_%s", stackName, env.Name)
+			if processedStacks[key] {
+				continue
+			}
+			processedStacks[key] = true
+
+			if err := generatePlantUMLDiagram(stackName, tgsConfig, env.Name); err != nil {
+				return fmt.Errorf("failed to generate diagram for stack %s, environment %s: %w", stackName, env.Name, err)
+			}
+
+			logger.Info("Generated diagram for stack %s, environment %s", stackName, env.Name)
 		}
 	}
 
-	logger.Info("Generated infrastructure diagrams in diagrams/ directory")
+	logger.Info("Generated infrastructure diagrams in .infrastructure/diagrams/ directory")
 	return nil
 }
 

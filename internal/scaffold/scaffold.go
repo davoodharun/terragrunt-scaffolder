@@ -131,22 +131,8 @@ func Generate() error {
 		return fmt.Errorf("failed to generate environment config files: %w", err)
 	}
 
-	// Read main config
-	mainConfig, err := readMainConfig()
-	if err != nil {
-		return fmt.Errorf("failed to read main config: %w", err)
-	}
-
-	// Create components directory
-	componentsDir := filepath.Join(baseDir, "_components")
-	if err := os.MkdirAll(componentsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create components directory: %w", err)
-	}
-
-	// Generate components with environment config
-	if err := generateComponentsWithEnvConfig(mainConfig, infraPath); err != nil {
-		return fmt.Errorf("failed to generate components: %w", err)
-	}
+	// Track processed stacks to avoid duplicate component generation
+	processedStacks := make(map[string]bool)
 
 	// Create subscription directories and configs
 	for subName, sub := range tgsConfig.Subscriptions {
@@ -160,78 +146,51 @@ func Generate() error {
 			return fmt.Errorf("failed to create subscription config: %w", err)
 		}
 
-		// Create region directories
-		for region, components := range mainConfig.Stack.Architecture.Regions {
-			regionPath := filepath.Join(subPath, region)
-			if err := os.MkdirAll(regionPath, 0755); err != nil {
-				return fmt.Errorf("failed to create region directory: %w", err)
+		// Process each environment with its specified stack
+		for _, env := range sub.Environments {
+			// Use the stack specified in the environment config, default to "main" if not specified
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
 			}
 
-			// Create region.hcl
-			if err := createRegionConfig(regionPath, region); err != nil {
-				return fmt.Errorf("failed to create region config: %w", err)
+			// Read the stack-specific config
+			mainConfig, err := readMainConfig(stackName)
+			if err != nil {
+				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}
 
-			// Create environment directories
-			for _, env := range sub.Environments {
-				envName := env.Name
-				envPath := filepath.Join(regionPath, envName)
-				if err := os.MkdirAll(envPath, 0755); err != nil {
-					return fmt.Errorf("failed to create environment directory: %w", err)
+			// Generate components for this stack if we haven't already
+			if !processedStacks[stackName] {
+				// Create components directory
+				componentsDir := filepath.Join(baseDir, "_components")
+				if err := os.MkdirAll(componentsDir, 0755); err != nil {
+					return fmt.Errorf("failed to create components directory: %w", err)
 				}
 
-				// Get environment prefix
-				envPrefix := getEnvironmentPrefix(envName)
-
-				// Create environment.hcl
-				envHCL := fmt.Sprintf(`locals {
-  environment_name = "%s"
-  environment_prefix = "%s"
-}`, envName, envPrefix)
-				if err := createFile(filepath.Join(envPath, "environment.hcl"), envHCL); err != nil {
-					return fmt.Errorf("failed to create environment.hcl: %w", err)
+				// Generate components with environment config
+				if err := generateComponentsWithEnvConfig(mainConfig, infraPath); err != nil {
+					return fmt.Errorf("failed to generate components for stack %s: %w", stackName, err)
 				}
 
-				// Create component directories
-				for _, comp := range components {
-					compPath := filepath.Join(envPath, comp.Component)
-					if err := os.MkdirAll(compPath, 0755); err != nil {
-						return fmt.Errorf("failed to create component directory: %w", err)
-					}
+				processedStacks[stackName] = true
+			}
 
-					if len(comp.Apps) > 0 {
-						// Create app directories if specified
-						for _, app := range comp.Apps {
-							appPath := filepath.Join(compPath, app)
-							if err := os.MkdirAll(appPath, 0755); err != nil {
-								return fmt.Errorf("failed to create app directory: %w", err)
-							}
+			// Create region directories and their contents
+			for region, _ := range mainConfig.Stack.Architecture.Regions {
+				regionPath := filepath.Join(subPath, region)
+				if err := os.MkdirAll(regionPath, 0755); err != nil {
+					return fmt.Errorf("failed to create region directory: %w", err)
+				}
 
-							// Create terragrunt.hcl for app
-							tgAppHCL := fmt.Sprintf(`include "root" {
-  path = find_in_parent_folders("root.hcl")
-}
+				// Create region.hcl
+				if err := createRegionConfig(regionPath, region); err != nil {
+					return fmt.Errorf("failed to create region config: %w", err)
+				}
 
-include "component" {
-  path = "${get_repo_root()}/.infrastructure/_components/%s/component.hcl"
-}`, comp.Component)
-							if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), tgAppHCL); err != nil {
-								return fmt.Errorf("failed to create app terragrunt.hcl: %w", err)
-							}
-						}
-					} else {
-						// Only create terragrunt.hcl for components without apps
-						tgCompHCL := fmt.Sprintf(`include "root" {
-  path = find_in_parent_folders("root.hcl")
-}
-
-include "component" {
-  path = "${get_repo_root()}/.infrastructure/_components/%s/component.hcl"
-}`, comp.Component)
-						if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), tgCompHCL); err != nil {
-							return fmt.Errorf("failed to create component terragrunt.hcl: %w", err)
-						}
-					}
+				// Create environment directory and its contents
+				if err := generateEnvironment(subName, region, env, mainConfig); err != nil {
+					return fmt.Errorf("failed to generate environment: %w", err)
 				}
 			}
 		}
@@ -809,12 +768,13 @@ func ReadTGSConfig() (*config.TGSConfig, error) {
 	return &cfg, nil
 }
 
-func readMainConfig() (*config.MainConfig, error) {
+// Update readMainConfig to accept a stack name parameter
+func readMainConfig(stackName string) (*config.MainConfig, error) {
 	// Get the stacks directory
 	stacksDir := getStacksDir()
 
 	// Try to read from the .tgs/stacks directory first
-	stackPath := filepath.Join(stacksDir, "main.yaml")
+	stackPath := filepath.Join(stacksDir, fmt.Sprintf("%s.yaml", stackName))
 	data, err := os.ReadFile(stackPath)
 	if err != nil {
 		// Try the executable's directory
@@ -823,10 +783,10 @@ func readMainConfig() (*config.MainConfig, error) {
 			return nil, fmt.Errorf("failed to get executable path: %w", err)
 		}
 		execDir := filepath.Dir(execPath)
-		data, err = os.ReadFile(filepath.Join(execDir, "main.yaml"))
+		data, err = os.ReadFile(filepath.Join(execDir, fmt.Sprintf("%s.yaml", stackName)))
 		if err != nil {
 			// Try current directory as fallback
-			data, err = os.ReadFile("main.yaml")
+			data, err = os.ReadFile(fmt.Sprintf("%s.yaml", stackName))
 			if err != nil {
 				return nil, err
 			}
@@ -969,6 +929,36 @@ func getDefaultSkuForEnvironment(env string) string {
 	}
 }
 
+// Helper function to get resource type abbreviation
+func getResourceTypeAbbreviation(resourceType string) string {
+	resourceAbbreviations := map[string]string{
+		"serviceplan":    "svcpln",
+		"appservice":     "appsvc",
+		"functionapp":    "fncapp",
+		"rediscache":     "cache",
+		"keyvault":       "kv",
+		"servicebus":     "sbus",
+		"cosmos_account": "cosmos",
+		"cosmos_db":      "cdb",
+		"apim":           "apim",
+		"storage":        "st",
+		"sql_server":     "sql",
+		"sql_database":   "sqldb",
+		"eventhub":       "evhub",
+		"loganalytics":   "log",
+	}
+
+	if abbr, ok := resourceAbbreviations[resourceType]; ok {
+		return abbr
+	}
+
+	// If no abbreviation found, return first 3 letters of the resource type
+	if len(resourceType) > 3 {
+		return resourceType[:3]
+	}
+	return resourceType
+}
+
 // Update the component.hcl template to use environment config files and infrastructure path
 func generateComponentsWithEnvConfig(mainConfig *config.MainConfig, infraPath string) error {
 	logger.Info("Generating components with environment config")
@@ -1012,12 +1002,12 @@ locals {
   # Get the directory name as the app name, defaulting to empty string if at component root
   app_name = try(basename(dirname(get_terragrunt_dir())), basename(get_terragrunt_dir()), "")
   
-  # Resource naming convention with prefixes
-  name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}"
-  resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
+  # Resource type abbreviation
+  resource_type = "%s"
   
-  # Get resource group name from global config
-  resource_group_name = local.global_config.locals.resource_groups[local.environment_name][local.region_name]
+  # Resource naming convention with prefixes and resource type
+  name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}-${local.resource_type}"
+  resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
 }
 
 terraform {
@@ -1045,7 +1035,7 @@ inputs = {
 
   # Include environment-specific configurations based on component type
 %s
-}`, compName, generateDependencyBlocks(comp.Deps, infraPath), generateEnvConfigInputs(compName))
+}`, getResourceTypeAbbreviation(compName), compName, generateDependencyBlocks(comp.Deps, infraPath), generateEnvConfigInputs(compName))
 
 		if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
 			return err
@@ -1065,16 +1055,24 @@ func generateEnvConfigInputs(compName string) string {
 	switch compName {
 	case "appservice":
 		return `# App Service specific settings
-sku_name = try(local.env_config.locals.app_service_sku.name, "B1")
-sku_tier = try(local.env_config.locals.app_service_sku.tier, "Basic")
-sku_size = try(local.env_config.locals.app_service_sku.size, "B1")
-sku_capacity = try(local.env_config.locals.app_service_sku.capacity, 1)`
+service_plan_id = dependency.serviceplan.outputs.id
+app_settings = try(local.env_config.locals.app_service_settings, {})
+https_only = true
+
+site_config {
+  application_stack {
+    dotnet_version = "6.0"
+  }
+  always_on = true
+}`
 	case "serviceplan":
 		return `# Service Plan specific settings
 sku_name = try(local.env_config.locals.app_service_sku.name, "B1")
 sku_tier = try(local.env_config.locals.app_service_sku.tier, "Basic")
 sku_size = try(local.env_config.locals.app_service_sku.size, "B1")
-sku_capacity = try(local.env_config.locals.app_service_sku.capacity, 1)`
+sku_capacity = try(local.env_config.locals.app_service_sku.capacity, 1)
+os_type = "Linux"
+worker_count = try(local.env_config.locals.app_service_sku.capacity, 1)`
 	case "rediscache":
 		return `# Redis Cache specific settings
 sku_name = try(local.env_config.locals.redis_cache_sku.name, "Basic")
@@ -1141,4 +1139,20 @@ func getConfigDir() string {
 // getStacksDir returns the path to the .tgs/stacks directory
 func getStacksDir() string {
 	return filepath.Join(getConfigDir(), "stacks")
+}
+
+// ReadMainConfig reads the stack configuration from the .tgs/stacks directory
+func ReadMainConfig(stackName string) (*config.MainConfig, error) {
+	stackPath := filepath.Join(".tgs", "stacks", fmt.Sprintf("%s.yaml", stackName))
+	data, err := os.ReadFile(stackPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read stack config file: %w", err)
+	}
+
+	var config config.MainConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal stack config: %w", err)
+	}
+
+	return &config, nil
 }

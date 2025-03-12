@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TGSYamlTemplate is the default template for tgs.yaml
@@ -104,7 +107,7 @@ func CreateFileIfNotExists(path string, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
-// InitProject initializes a new project with tgs.yaml and main.yaml
+// InitProject initializes a new project with tgs.yaml
 func InitProject() error {
 	fmt.Println("Initializing new project with tgs.yaml...")
 
@@ -128,7 +131,7 @@ func InitProject() error {
 
 	// Create default main.yaml in .tgs/stacks directory
 	mainStackPath := filepath.Join(stacksDir, "main.yaml")
-	if err := CreateFileIfNotExists(mainStackPath, MainYamlTemplate); err != nil {
+	if err := CreateStack("main"); err != nil {
 		return fmt.Errorf("failed to create main.yaml: %w", err)
 	}
 
@@ -140,51 +143,260 @@ func InitProject() error {
 
 // CreateStack creates a new stack configuration file
 func CreateStack(name string) error {
-	// Create .tgs/stacks directory
-	stacksDir := getStacksDir()
+	// Create stacks directory if it doesn't exist
+	stacksDir := ".tgs/stacks"
 	if err := os.MkdirAll(stacksDir, 0755); err != nil {
-		return fmt.Errorf("failed to create stacks directory %s: %w", stacksDir, err)
+		return fmt.Errorf("failed to create stacks directory: %w", err)
 	}
 
-	filename := fmt.Sprintf("%s.yaml", name)
-	stackPath := filepath.Join(stacksDir, filename)
-
-	fmt.Printf("Creating new stack configuration: %s...\n", stackPath)
-
-	if err := CreateFileIfNotExists(stackPath, MainYamlTemplate); err != nil {
-		return fmt.Errorf("failed to create %s: %w", filename, err)
+	// Create the YAML structure with ordered nodes
+	root := &yaml.Node{
+		Kind: yaml.DocumentNode,
+		Content: []*yaml.Node{
+			{
+				Kind: yaml.MappingNode,
+				Content: []*yaml.Node{
+					{Kind: yaml.ScalarNode, Value: "stack"},
+					{
+						Kind: yaml.MappingNode,
+						Content: []*yaml.Node{
+							// Components section first
+							{Kind: yaml.ScalarNode, Value: "components"},
+							{
+								Kind: yaml.MappingNode,
+								Content: []*yaml.Node{
+									{Kind: yaml.ScalarNode, Value: "serviceplan"},
+									{
+										Kind: yaml.MappingNode,
+										Content: []*yaml.Node{
+											{Kind: yaml.ScalarNode, Value: "source"},
+											{Kind: yaml.ScalarNode, Value: "azurerm_service_plan"},
+											{Kind: yaml.ScalarNode, Value: "provider"},
+											{Kind: yaml.ScalarNode, Value: "azurerm"},
+											{Kind: yaml.ScalarNode, Value: "version"},
+											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+										},
+									},
+									{Kind: yaml.ScalarNode, Value: "appservice"},
+									{
+										Kind: yaml.MappingNode,
+										Content: []*yaml.Node{
+											{Kind: yaml.ScalarNode, Value: "source"},
+											{Kind: yaml.ScalarNode, Value: "azurerm_linux_web_app"},
+											{Kind: yaml.ScalarNode, Value: "provider"},
+											{Kind: yaml.ScalarNode, Value: "azurerm"},
+											{Kind: yaml.ScalarNode, Value: "version"},
+											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+											{Kind: yaml.ScalarNode, Value: "deps"},
+											{
+												Kind: yaml.SequenceNode,
+												Content: []*yaml.Node{
+													{Kind: yaml.ScalarNode, Value: "{region}.serviceplan"},
+												},
+											},
+										},
+									},
+									{Kind: yaml.ScalarNode, Value: "rediscache"},
+									{
+										Kind: yaml.MappingNode,
+										Content: []*yaml.Node{
+											{Kind: yaml.ScalarNode, Value: "source"},
+											{Kind: yaml.ScalarNode, Value: "azurerm_redis_cache"},
+											{Kind: yaml.ScalarNode, Value: "provider"},
+											{Kind: yaml.ScalarNode, Value: "azurerm"},
+											{Kind: yaml.ScalarNode, Value: "version"},
+											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+										},
+									},
+									{Kind: yaml.ScalarNode, Value: "keyvault"},
+									{
+										Kind: yaml.MappingNode,
+										Content: []*yaml.Node{
+											{Kind: yaml.ScalarNode, Value: "source"},
+											{Kind: yaml.ScalarNode, Value: "azurerm_key_vault"},
+											{Kind: yaml.ScalarNode, Value: "provider"},
+											{Kind: yaml.ScalarNode, Value: "azurerm"},
+											{Kind: yaml.ScalarNode, Value: "version"},
+											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+										},
+									},
+									{Kind: yaml.ScalarNode, Value: "appservice_api"},
+									{
+										Kind: yaml.MappingNode,
+										Content: []*yaml.Node{
+											{Kind: yaml.ScalarNode, Value: "source"},
+											{Kind: yaml.ScalarNode, Value: "azurerm_linux_web_app"},
+											{Kind: yaml.ScalarNode, Value: "provider"},
+											{Kind: yaml.ScalarNode, Value: "azurerm"},
+											{Kind: yaml.ScalarNode, Value: "version"},
+											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+											{Kind: yaml.ScalarNode, Value: "deps"},
+											{
+												Kind: yaml.SequenceNode,
+												Content: []*yaml.Node{
+													{Kind: yaml.ScalarNode, Value: "{region}.serviceplan"},
+													{Kind: yaml.ScalarNode, Value: "{region}.rediscache"},
+													{Kind: yaml.ScalarNode, Value: "{region}.keyvault"},
+													{Kind: yaml.ScalarNode, Value: "westus2.appservice.web"},
+												},
+											},
+										},
+									},
+								},
+							},
+							// Architecture section second
+							{Kind: yaml.ScalarNode, Value: "architecture"},
+							{
+								Kind: yaml.MappingNode,
+								Content: []*yaml.Node{
+									{Kind: yaml.ScalarNode, Value: "regions"},
+									{
+										Kind: yaml.MappingNode,
+										Content: []*yaml.Node{
+											{Kind: yaml.ScalarNode, Value: "eastus2"},
+											{
+												Kind: yaml.SequenceNode,
+												Content: []*yaml.Node{
+													{
+														Kind: yaml.MappingNode,
+														Content: []*yaml.Node{
+															{Kind: yaml.ScalarNode, Value: "component"},
+															{Kind: yaml.ScalarNode, Value: "serviceplan"},
+															{Kind: yaml.ScalarNode, Value: "apps"},
+															{Kind: yaml.SequenceNode},
+														},
+													},
+													{
+														Kind: yaml.MappingNode,
+														Content: []*yaml.Node{
+															{Kind: yaml.ScalarNode, Value: "component"},
+															{Kind: yaml.ScalarNode, Value: "rediscache"},
+															{Kind: yaml.ScalarNode, Value: "apps"},
+															{Kind: yaml.SequenceNode},
+														},
+													},
+													{
+														Kind: yaml.MappingNode,
+														Content: []*yaml.Node{
+															{Kind: yaml.ScalarNode, Value: "component"},
+															{Kind: yaml.ScalarNode, Value: "keyvault"},
+															{Kind: yaml.ScalarNode, Value: "apps"},
+															{Kind: yaml.SequenceNode},
+														},
+													},
+													{
+														Kind: yaml.MappingNode,
+														Content: []*yaml.Node{
+															{Kind: yaml.ScalarNode, Value: "component"},
+															{Kind: yaml.ScalarNode, Value: "appservice_api"},
+															{Kind: yaml.ScalarNode, Value: "apps"},
+															{
+																Kind: yaml.SequenceNode,
+																Content: []*yaml.Node{
+																	{Kind: yaml.ScalarNode, Value: "api"},
+																},
+															},
+														},
+													},
+												},
+											},
+											{Kind: yaml.ScalarNode, Value: "westus2"},
+											{
+												Kind: yaml.SequenceNode,
+												Content: []*yaml.Node{
+													{
+														Kind: yaml.MappingNode,
+														Content: []*yaml.Node{
+															{Kind: yaml.ScalarNode, Value: "component"},
+															{Kind: yaml.ScalarNode, Value: "serviceplan"},
+															{Kind: yaml.ScalarNode, Value: "apps"},
+															{Kind: yaml.SequenceNode},
+														},
+													},
+													{
+														Kind: yaml.MappingNode,
+														Content: []*yaml.Node{
+															{Kind: yaml.ScalarNode, Value: "component"},
+															{Kind: yaml.ScalarNode, Value: "appservice"},
+															{Kind: yaml.ScalarNode, Value: "apps"},
+															{
+																Kind: yaml.SequenceNode,
+																Content: []*yaml.Node{
+																	{Kind: yaml.ScalarNode, Value: "web"},
+																},
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
-	fmt.Printf("Successfully created %s\n", stackPath)
+	// Add a comment header
+	header := `# Stack Configuration
+# This example demonstrates a multi-region architecture with dependencies:
+#
+# East US 2 Region:
+# - Service Plan for hosting applications
+# - Redis Cache for caching
+# - Key Vault for secrets
+# - API App Service with dependencies on:
+#   - Local Service Plan
+#   - Local Redis Cache
+#   - Local Key Vault
+#   - Web App in West US 2 (cross-region dependency)
+#
+# West US 2 Region:
+# - Service Plan for hosting applications
+# - Web App Service (frontend)
+#
+# This setup shows both:
+# 1. Dependencies within the same region (API -> Service Plan, Redis, Key Vault)
+# 2. Cross-region dependencies (API -> Web App)
+
+`
+
+	// Write the configuration to file
+	filename := filepath.Join(stacksDir, fmt.Sprintf("%s.yaml", name))
+	f, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create stack file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(header); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+
+	encoder := yaml.NewEncoder(f)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(root); err != nil {
+		return fmt.Errorf("failed to write stack config: %w", err)
+	}
+
+	fmt.Printf("Created stack configuration: %s\n", filename)
 	return nil
 }
 
-// ListStacks lists all stack files in the .tgs/stacks directory
+// ListStacks lists all available stacks in the .tgs/stacks directory
 func ListStacks() error {
-	stacksDir := getStacksDir()
-
-	// Check if stacks directory exists
-	if _, err := os.Stat(stacksDir); os.IsNotExist(err) {
-		fmt.Println("No stacks found. Use 'tgs create stack' to create a stack.")
-		return nil
-	}
-
-	// Read all files in the stacks directory
-	files, err := os.ReadDir(stacksDir)
+	files, err := os.ReadDir(".tgs/stacks")
 	if err != nil {
 		return fmt.Errorf("failed to read stacks directory: %w", err)
 	}
 
-	if len(files) == 0 {
-		fmt.Println("No stacks found. Use 'tgs create stack' to create a stack.")
-		return nil
-	}
-
-	fmt.Println("Available stacks:")
+	fmt.Println("\nAvailable stacks:")
 	for _, file := range files {
 		if !file.IsDir() && filepath.Ext(file.Name()) == ".yaml" {
-			stackName := file.Name()[:len(file.Name())-len(".yaml")]
-			fmt.Printf("  - %s\n", stackName)
+			fmt.Printf("- %s\n", strings.TrimSuffix(file.Name(), ".yaml"))
 		}
 	}
 
