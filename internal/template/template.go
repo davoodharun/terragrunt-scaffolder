@@ -11,12 +11,12 @@ import (
 )
 
 // TGSYamlTemplate is the default template for tgs.yaml
-const TGSYamlTemplate = `name: CUSTTP  # Your project name
+const TGSYamlTemplate = `name: projectA  # Your project name
 subscriptions:
   nonprod:
     remotestate:
-      name: # Storage account name for remote state
-      resource_group: # Resource group for remote state
+      name: stprojectanonprodtf  # Example: Storage account name for remote state
+      resource_group: rg-projecta-nonprod-tf  # Example: Resource group for remote state
     environments:
       - name: dev
         stack: main
@@ -24,8 +24,8 @@ subscriptions:
         stack: main
   prod:
     remotestate:
-      name: # Storage account name for remote state
-      resource_group: # Resource group for remote state
+      name: stprojectaprodtf  # Example: Storage account name for remote state
+      resource_group: rg-projecta-prod-tf  # Example: Resource group for remote state
     environments:
       - name: prod
         stack: main
@@ -160,7 +160,14 @@ func CreateStack(name string) error {
 					{
 						Kind: yaml.MappingNode,
 						Content: []*yaml.Node{
-							// Components section first
+							// Stack metadata first
+							{Kind: yaml.ScalarNode, Value: "name"},
+							{Kind: yaml.ScalarNode, Value: name},
+							{Kind: yaml.ScalarNode, Value: "version"},
+							{Kind: yaml.ScalarNode, Value: "1.0.0"},
+							{Kind: yaml.ScalarNode, Value: "description"},
+							{Kind: yaml.ScalarNode, Value: "Default infrastructure stack with web applications and supporting services"},
+							// Components section second
 							{Kind: yaml.ScalarNode, Value: "components"},
 							{
 								Kind: yaml.MappingNode,
@@ -175,6 +182,8 @@ func CreateStack(name string) error {
 											{Kind: yaml.ScalarNode, Value: "azurerm"},
 											{Kind: yaml.ScalarNode, Value: "version"},
 											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+											{Kind: yaml.ScalarNode, Value: "description"},
+											{Kind: yaml.ScalarNode, Value: "Shared service plan for web applications"},
 										},
 									},
 									{Kind: yaml.ScalarNode, Value: "appservice"},
@@ -187,6 +196,8 @@ func CreateStack(name string) error {
 											{Kind: yaml.ScalarNode, Value: "azurerm"},
 											{Kind: yaml.ScalarNode, Value: "version"},
 											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+											{Kind: yaml.ScalarNode, Value: "description"},
+											{Kind: yaml.ScalarNode, Value: "Web application service"},
 											{Kind: yaml.ScalarNode, Value: "deps"},
 											{
 												Kind: yaml.SequenceNode,
@@ -206,6 +217,8 @@ func CreateStack(name string) error {
 											{Kind: yaml.ScalarNode, Value: "azurerm"},
 											{Kind: yaml.ScalarNode, Value: "version"},
 											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+											{Kind: yaml.ScalarNode, Value: "description"},
+											{Kind: yaml.ScalarNode, Value: "Redis cache for application caching"},
 										},
 									},
 									{Kind: yaml.ScalarNode, Value: "keyvault"},
@@ -218,6 +231,8 @@ func CreateStack(name string) error {
 											{Kind: yaml.ScalarNode, Value: "azurerm"},
 											{Kind: yaml.ScalarNode, Value: "version"},
 											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+											{Kind: yaml.ScalarNode, Value: "description"},
+											{Kind: yaml.ScalarNode, Value: "Key Vault for storing secrets and certificates"},
 										},
 									},
 									{Kind: yaml.ScalarNode, Value: "appservice_api"},
@@ -230,6 +245,8 @@ func CreateStack(name string) error {
 											{Kind: yaml.ScalarNode, Value: "azurerm"},
 											{Kind: yaml.ScalarNode, Value: "version"},
 											{Kind: yaml.ScalarNode, Value: "3.0.0"},
+											{Kind: yaml.ScalarNode, Value: "description"},
+											{Kind: yaml.ScalarNode, Value: "Backend API service"},
 											{Kind: yaml.ScalarNode, Value: "deps"},
 											{
 												Kind: yaml.SequenceNode,
@@ -244,7 +261,7 @@ func CreateStack(name string) error {
 									},
 								},
 							},
-							// Architecture section second
+							// Architecture section third
 							{Kind: yaml.ScalarNode, Value: "architecture"},
 							{
 								Kind: yaml.MappingNode,

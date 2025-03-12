@@ -1,0 +1,92 @@
+stack:
+  name: "event-driven"
+  description: "Event-driven architecture with multiple event processors and storage"
+  version: "1.0.0"
+  
+  components:
+    serviceplan:
+      source: "azurerm_service_plan"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Service plan for function apps"
+
+    eventhub_namespace:
+      source: "azurerm_eventhub_namespace"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Event Hub Namespace for message processing"
+
+    eventhub_input:
+      source: "azurerm_eventhub"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Input event hub for raw events"
+      deps:
+        - "{region}.eventhub_namespace"
+
+    eventhub_processed:
+      source: "azurerm_eventhub"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Output event hub for processed events"
+      deps:
+        - "{region}.eventhub_namespace"
+
+    functionapp_processor:
+      source: "azurerm_linux_function_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Event processor function app"
+      deps:
+        - "{region}.serviceplan"
+        - "{region}.eventhub_input"
+        - "{region}.eventhub_processed"
+        - "{region}.storage_data"
+
+    functionapp_aggregator:
+      source: "azurerm_linux_function_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Event aggregator function app"
+      deps:
+        - "{region}.serviceplan"
+        - "{region}.eventhub_processed"
+        - "{region}.cosmos_account"
+
+    storage_data:
+      source: "azurerm_storage_account"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Storage account for raw data"
+
+    cosmos_account:
+      source: "azurerm_cosmosdb_account"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Cosmos DB for processed data"
+
+    loganalytics:
+      source: "azurerm_log_analytics_workspace"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Log Analytics for monitoring"
+
+    keyvault:
+      source: "azurerm_key_vault"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Key Vault for storing secrets"
+
+  architecture:
+    regions:
+      eastus2:
+        - component: serviceplan
+        - component: eventhub_namespace
+        - component: eventhub_input
+        - component: eventhub_processed
+        - component: functionapp_processor
+        - component: functionapp_aggregator
+        - component: storage_data
+        - component: cosmos_account
+        - component: loganalytics
+        - component: keyvault 

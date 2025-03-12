@@ -1,0 +1,58 @@
+stack:
+  name: "web-app"
+  description: "Simple web application stack with frontend, backend API, and database"
+  version: "1.0.0"
+  
+  components:
+    serviceplan:
+      source: "azurerm_service_plan"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Shared service plan for web applications"
+
+    appservice_frontend:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Frontend web application"
+      deps:
+        - "{region}.serviceplan"
+
+    appservice_api:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Backend API service"
+      deps:
+        - "{region}.serviceplan"
+        - "{region}.sql_server"
+
+    sql_server:
+      source: "azurerm_sql_server"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "SQL Server instance"
+
+    sql_database:
+      source: "azurerm_sql_database"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Application database"
+      deps:
+        - "{region}.sql_server"
+
+    keyvault:
+      source: "azurerm_key_vault"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Key Vault for storing secrets"
+
+  architecture:
+    regions:
+      eastus2:
+        - component: serviceplan
+        - component: appservice_frontend
+        - component: appservice_api
+        - component: sql_server
+        - component: sql_database
+        - component: keyvault 

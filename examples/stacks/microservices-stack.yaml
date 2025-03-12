@@ -1,0 +1,140 @@
+stack:
+  name: "microservices"
+  description: "Microservices architecture with API Management, multiple services, and shared infrastructure"
+  version: "1.0.0"
+  
+  components:
+    serviceplan:
+      source: "azurerm_service_plan"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Shared service plan for all services"
+
+    apim:
+      source: "azurerm_api_management"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "API Management gateway"
+
+    appservice_users:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "User management service"
+      deps:
+        - "{region}.serviceplan"
+        - "{region}.sql_server"
+        - "{region}.servicebus_namespace"
+
+    appservice_orders:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Order processing service"
+      deps:
+        - "{region}.serviceplan"
+        - "{region}.sql_server"
+        - "{region}.servicebus_namespace"
+
+    appservice_inventory:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Inventory management service"
+      deps:
+        - "{region}.serviceplan"
+        - "{region}.cosmos_account"
+        - "{region}.servicebus_namespace"
+
+    appservice_notifications:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Notification service"
+      deps:
+        - "{region}.serviceplan"
+        - "{region}.servicebus_namespace"
+
+    sql_server:
+      source: "azurerm_sql_server"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Shared SQL Server instance"
+
+    sql_database_users:
+      source: "azurerm_sql_database"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Users service database"
+      deps:
+        - "{region}.sql_server"
+
+    sql_database_orders:
+      source: "azurerm_sql_database"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Orders service database"
+      deps:
+        - "{region}.sql_server"
+
+    cosmos_account:
+      source: "azurerm_cosmosdb_account"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Cosmos DB for inventory service"
+
+    redis:
+      source: "azurerm_redis_cache"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Redis cache for distributed caching"
+
+    servicebus_namespace:
+      source: "azurerm_servicebus_namespace"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Service Bus for inter-service communication"
+
+    keyvault:
+      source: "azurerm_key_vault"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Key Vault for storing secrets"
+
+    loganalytics:
+      source: "azurerm_log_analytics_workspace"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Centralized logging"
+
+  architecture:
+    regions:
+      eastus2:
+        - component: serviceplan
+        - component: apim
+        - component: appservice_users
+        - component: appservice_orders
+        - component: appservice_inventory
+        - component: appservice_notifications
+        - component: sql_server
+        - component: sql_database_users
+        - component: sql_database_orders
+        - component: cosmos_account
+        - component: redis
+        - component: servicebus_namespace
+        - component: keyvault
+        - component: loganalytics
+      westus2:
+        - component: serviceplan
+        - component: appservice_users
+        - component: appservice_orders
+        - component: appservice_inventory
+        - component: appservice_notifications
+        - component: sql_server
+        - component: sql_database_users
+        - component: sql_database_orders
+        - component: cosmos_account
+        - component: redis
+        - component: servicebus_namespace
+        - component: keyvault
+        - component: loganalytics 

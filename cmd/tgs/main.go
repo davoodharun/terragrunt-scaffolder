@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/azure"
@@ -13,6 +14,71 @@ import (
 	"github.com/davoodharun/terragrunt-scaffolder/internal/validate"
 	"github.com/spf13/cobra"
 )
+
+// detailsCmd shows detailed information about a stack
+var detailsCmd = &cobra.Command{
+	Use:   "details [stack]",
+	Short: "Show detailed information about a stack configuration",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		stackName := "main"
+		if len(args) > 0 {
+			stackName = args[0]
+		}
+
+		// Read the stack configuration
+		mainConfig, err := scaffold.ReadMainConfig(stackName)
+		if err != nil {
+			return fmt.Errorf("failed to read stack config: %w", err)
+		}
+
+		// Print stack details
+		fmt.Printf("\nStack: %s\n", mainConfig.Stack.Name)
+		fmt.Printf("Version: %s\n", mainConfig.Stack.Version)
+		fmt.Printf("Description: %s\n\n", mainConfig.Stack.Description)
+
+		// Group components by type
+		componentTypes := make(map[string][]string)
+		for name, comp := range mainConfig.Stack.Components {
+			resourceType := strings.TrimPrefix(comp.Source, "azurerm_")
+			componentTypes[resourceType] = append(componentTypes[resourceType], name)
+		}
+
+		// Sort resource types for consistent output
+		var types []string
+		for t := range componentTypes {
+			types = append(types, t)
+		}
+		sort.Strings(types)
+
+		fmt.Println("Resources:")
+		fmt.Println("----------")
+		for _, resourceType := range types {
+			components := componentTypes[resourceType]
+			sort.Strings(components)
+			fmt.Printf("\n%s:\n", strings.ReplaceAll(resourceType, "_", " "))
+			for _, comp := range components {
+				fmt.Printf("  - %s: %s\n", comp, mainConfig.Stack.Components[comp].Description)
+			}
+		}
+
+		fmt.Println("\nRegions:")
+		fmt.Println("--------")
+		for region, components := range mainConfig.Stack.Architecture.Regions {
+			fmt.Printf("\n%s:\n", region)
+			var compNames []string
+			for _, comp := range components {
+				compNames = append(compNames, comp.Component)
+			}
+			sort.Strings(compNames)
+			for _, comp := range compNames {
+				fmt.Printf("  - %s\n", comp)
+			}
+		}
+
+		return nil
+	},
+}
 
 func main() {
 	rootCmd := &cobra.Command{
@@ -270,6 +336,7 @@ func main() {
 	rootCmd.AddCommand(diagramCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(validateTGSCmd)
+	rootCmd.AddCommand(detailsCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

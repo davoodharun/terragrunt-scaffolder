@@ -25,15 +25,19 @@ type MainConfig struct {
 }
 
 type Stack struct {
+	Name         string               `yaml:"name"`
+	Version      string               `yaml:"version"`
+	Description  string               `yaml:"description"`
 	Components   map[string]Component `yaml:"components"`
 	Architecture Architecture         `yaml:"architecture"`
 }
 
 type Component struct {
-	Source   string   `yaml:"source"`
-	Deps     []string `yaml:"deps"`
-	Provider string   `yaml:"provider"`
-	Version  string   `yaml:"version"`
+	Source      string   `yaml:"source"`
+	Deps        []string `yaml:"deps"`
+	Provider    string   `yaml:"provider"`
+	Version     string   `yaml:"version"`
+	Description string   `yaml:"description"`
 }
 
 type Architecture struct {
