@@ -44,7 +44,6 @@ jobs:
     - name: Update Go Dependencies
       run: |
         # Initialize at root level for all packages
-        go mod init github.com/davoodharun/terragrunt-scaffolder
         go mod tidy
     
     - name: Build binaries

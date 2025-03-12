@@ -871,38 +871,109 @@ locals {
 		for _, env := range sub.Environments {
 			envName := env.Name
 
-			// Create environment config file with default values
-			configContent := fmt.Sprintf(`# Configuration for %s environment
-# Override these values as needed for your environment
+			// Use the stack specified in the environment config, default to "main" if not specified
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
+			}
 
-locals {
-  # Default SKUs and tiers for various services
-  app_service_sku = {
-    name     = "%s"
-    tier     = "Standard"
-    size     = "%s"
-    capacity = 1
-  }
-  
-  redis_cache_sku = {
-    name     = "Standard"
-    family   = "C"
-    capacity = 1
-  }
-  
-  cosmos_db_settings = {
-    offer_type       = "Standard"
-    consistency_level = "Session"
-    max_throughput   = 1000
-  }
-  
-  servicebus_sku = "Standard"
-  
-  # Add more environment-specific settings as needed
-}`, envName, getDefaultSkuForEnvironment(envName), getDefaultSkuForEnvironment(envName))
+			// Read the stack configuration to get actual components
+			mainConfig, err := readMainConfig(stackName)
+			if err != nil {
+				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+			}
 
+			// Build environment config content with only the components that exist in the stack
+			var configContent strings.Builder
+			configContent.WriteString(fmt.Sprintf("# Configuration for %s environment\n", envName))
+			configContent.WriteString("# Override these values as needed for your environment\n\n")
+			configContent.WriteString("locals {\n")
+
+			// Add configurations only for components that exist in the stack
+			for compName := range mainConfig.Stack.Components {
+				switch compName {
+				case "serviceplan":
+					configContent.WriteString(`  # Service Plan Configuration
+  serviceplan = {
+    sku = {
+      name     = "` + getDefaultSkuForEnvironment(envName) + `"
+      tier     = "Standard"
+      size     = "` + getDefaultSkuForEnvironment(envName) + `"
+      capacity = 1
+    }
+    os_type      = "Linux"
+    worker_count = 1
+  }
+
+`)
+				case "appservice":
+					configContent.WriteString(`  # App Service Configuration
+  appservice = {
+    https_only = true
+    site_config = {
+      always_on = true
+      application_stack = {
+        dotnet_version = "6.0"
+      }
+      use_32_bit_worker = false
+      websockets_enabled = false
+    }
+    app_settings = {
+      WEBSITES_ENABLE_APP_SERVICE_STORAGE = false
+      WEBSITE_RUN_FROM_PACKAGE = 1
+    }
+  }
+
+`)
+				case "functionapp":
+					configContent.WriteString(`  # Function App Configuration
+  functionapp = {
+    https_only = true
+    site_config = {
+      always_on = true
+      application_stack = {
+        node_version = "16"
+      }
+    }
+    app_settings = {
+      FUNCTIONS_WORKER_RUNTIME = "node"
+      WEBSITE_NODE_DEFAULT_VERSION = "~16"
+    }
+  }
+
+`)
+				case "rediscache":
+					configContent.WriteString(`  # Redis Cache Configuration
+  rediscache = {
+    sku = {
+      name     = "Basic"
+      family   = "C"
+      capacity = 1
+    }
+    enable_non_ssl_port = false
+    minimum_tls_version = "1.2"
+  }
+
+`)
+				case "keyvault":
+					configContent.WriteString(`  # Key Vault Configuration
+  keyvault = {
+    sku_name = "standard"
+    enabled_for_disk_encryption = true
+    enabled_for_deployment = true
+    enabled_for_template_deployment = true
+    purge_protection_enabled = true
+  }
+
+`)
+				}
+			}
+
+			configContent.WriteString("}")
+
+			// Create environment config file
 			configPath := filepath.Join(configDir, fmt.Sprintf("%s.hcl", envName))
-			if err := createFile(configPath, configContent); err != nil {
+			if err := createFile(configPath, configContent.String()); err != nil {
 				return fmt.Errorf("failed to create environment config file: %w", err)
 			}
 
@@ -1056,36 +1127,91 @@ func generateEnvConfigInputs(compName string) string {
 	case "appservice":
 		return `# App Service specific settings
 service_plan_id = dependency.serviceplan.outputs.id
-app_settings = try(local.env_config.locals.app_service_settings, {})
-https_only = true
 
-site_config {
-  application_stack {
-    dotnet_version = "6.0"
-  }
-  always_on = true
-}`
+# Import all app service settings from environment config
+https_only = try(local.env_config.locals.appservice.https_only, true)
+site_config = try(local.env_config.locals.appservice.site_config, {})
+app_settings = try(local.env_config.locals.appservice.app_settings, {})`
+
 	case "serviceplan":
 		return `# Service Plan specific settings
-sku_name = try(local.env_config.locals.app_service_sku.name, "B1")
-sku_tier = try(local.env_config.locals.app_service_sku.tier, "Basic")
-sku_size = try(local.env_config.locals.app_service_sku.size, "B1")
-sku_capacity = try(local.env_config.locals.app_service_sku.capacity, 1)
-os_type = "Linux"
-worker_count = try(local.env_config.locals.app_service_sku.capacity, 1)`
+sku_name = try(local.env_config.locals.serviceplan.sku.name, "B1")
+sku_tier = try(local.env_config.locals.serviceplan.sku.tier, "Basic")
+sku_size = try(local.env_config.locals.serviceplan.sku.size, "B1")
+sku_capacity = try(local.env_config.locals.serviceplan.sku.capacity, 1)
+os_type = try(local.env_config.locals.serviceplan.os_type, "Linux")
+worker_count = try(local.env_config.locals.serviceplan.worker_count, 1)`
+
+	case "functionapp":
+		return `# Function App specific settings
+service_plan_id = dependency.serviceplan.outputs.id
+https_only = try(local.env_config.locals.functionapp.https_only, true)
+site_config = try(local.env_config.locals.functionapp.site_config, {})
+app_settings = try(local.env_config.locals.functionapp.app_settings, {})`
+
 	case "rediscache":
 		return `# Redis Cache specific settings
-sku_name = try(local.env_config.locals.redis_cache_sku.name, "Basic")
-family = try(local.env_config.locals.redis_cache_sku.family, "C")
-capacity = try(local.env_config.locals.redis_cache_sku.capacity, 0)`
-	case "cosmos_account", "cosmos_db":
-		return `# Cosmos DB specific settings
-offer_type = try(local.env_config.locals.cosmos_db_settings.offer_type, "Standard")
-consistency_level = try(local.env_config.locals.cosmos_db_settings.consistency_level, "Session")
-max_throughput = try(local.env_config.locals.cosmos_db_settings.max_throughput, 1000)`
+sku_name = try(local.env_config.locals.rediscache.sku.name, "Basic")
+family = try(local.env_config.locals.rediscache.sku.family, "C")
+capacity = try(local.env_config.locals.rediscache.sku.capacity, 0)
+enable_non_ssl_port = try(local.env_config.locals.rediscache.enable_non_ssl_port, false)
+minimum_tls_version = try(local.env_config.locals.rediscache.minimum_tls_version, "1.2")`
+
+	case "keyvault":
+		return `# Key Vault specific settings
+sku_name = try(local.env_config.locals.keyvault.sku_name, "standard")
+enabled_for_disk_encryption = try(local.env_config.locals.keyvault.enabled_for_disk_encryption, true)
+enabled_for_deployment = try(local.env_config.locals.keyvault.enabled_for_deployment, true)
+enabled_for_template_deployment = try(local.env_config.locals.keyvault.enabled_for_template_deployment, true)
+purge_protection_enabled = try(local.env_config.locals.keyvault.purge_protection_enabled, true)`
+
 	case "servicebus":
 		return `# Service Bus specific settings
-sku = try(local.env_config.locals.servicebus_sku, "Standard")`
+sku = try(local.env_config.locals.servicebus.sku, "Standard")
+capacity = try(local.env_config.locals.servicebus.capacity, 1)
+zone_redundant = try(local.env_config.locals.servicebus.zone_redundant, false)`
+
+	case "cosmos_account":
+		return `# Cosmos DB Account specific settings
+offer_type = try(local.env_config.locals.cosmos_account.offer_type, "Standard")
+kind = try(local.env_config.locals.cosmos_account.kind, "GlobalDocumentDB")
+consistency_level = try(local.env_config.locals.cosmos_account.consistency_level, "Session")
+geo_location = try(local.env_config.locals.cosmos_account.geo_location, {})
+capabilities = try(local.env_config.locals.cosmos_account.capabilities, [])`
+
+	case "storage":
+		return `# Storage Account specific settings
+account_tier = try(local.env_config.locals.storage.account_tier, "Standard")
+account_replication_type = try(local.env_config.locals.storage.account_replication_type, "LRS")
+min_tls_version = try(local.env_config.locals.storage.min_tls_version, "TLS1_2")
+allow_nested_items_to_be_public = try(local.env_config.locals.storage.allow_nested_items_to_be_public, false)`
+
+	case "sql_server":
+		return `# SQL Server specific settings
+version = try(local.env_config.locals.sql_server.version, "12.0")
+administrator_login = try(local.env_config.locals.sql_server.administrator_login, "sqladmin")
+minimum_tls_version = try(local.env_config.locals.sql_server.minimum_tls_version, "1.2")`
+
+	case "sql_database":
+		return `# SQL Database specific settings
+sku_name = try(local.env_config.locals.sql_database.sku.name, "Basic")
+max_size_gb = try(local.env_config.locals.sql_database.max_size_gb, 2)
+zone_redundant = try(local.env_config.locals.sql_database.zone_redundant, false)`
+
+	case "eventhub":
+		return `# Event Hub specific settings
+sku = try(local.env_config.locals.eventhub.sku, "Standard")
+capacity = try(local.env_config.locals.eventhub.capacity, 1)
+partition_count = try(local.env_config.locals.eventhub.partition_count, 2)
+message_retention = try(local.env_config.locals.eventhub.message_retention, 1)
+zone_redundant = try(local.env_config.locals.eventhub.zone_redundant, false)`
+
+	case "loganalytics":
+		return `# Log Analytics specific settings
+sku = try(local.env_config.locals.loganalytics.sku, "PerGB2018")
+retention_in_days = try(local.env_config.locals.loganalytics.retention_in_days, 30)
+daily_quota_gb = try(local.env_config.locals.loganalytics.daily_quota_gb, 1)`
+
 	default:
 		return "# No component-specific settings"
 	}
