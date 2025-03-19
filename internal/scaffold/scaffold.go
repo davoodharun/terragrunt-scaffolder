@@ -150,6 +150,27 @@ func Generate() error {
 	// Track processed stacks to avoid duplicate component generation
 	processedStacks := make(map[string]bool)
 
+	// Count total components for progress bar
+	totalComponents := 0
+	for _, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
+			}
+
+			mainConfig, err := readMainConfig(stackName)
+			if err != nil {
+				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+			}
+
+			totalComponents += len(mainConfig.Stack.Components)
+		}
+	}
+
+	// Start progress bar for component generation
+	logger.StartProgress("Generating components", totalComponents)
+
 	// First pass: collect all components that will be used
 	for _, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
@@ -281,6 +302,11 @@ func Generate() error {
 				if err := generateEnvironment(subName, region, env, mainConfig); err != nil {
 					return fmt.Errorf("failed to generate environment: %w", err)
 				}
+
+				// Update progress for each component in this region
+				for range mainConfig.Stack.Architecture.Regions[region] {
+					logger.UpdateProgress()
+				}
 			}
 		}
 
@@ -309,7 +335,10 @@ func Generate() error {
 		}
 	}
 
-	logger.Info("Terragrunt scaffolding generation complete")
+	// Finish progress bar
+	logger.FinishProgress()
+
+	logger.Success("Terragrunt scaffolding generation complete")
 	return nil
 }
 
@@ -1009,7 +1038,7 @@ locals {
 					configContent.WriteString(`  # Service Plan Configuration
   serviceplan = {
     sku = {
-      name     = "` + getDefaultSkuForEnvironment(envName) + `"
+      name     = ` + getDefaultSkuForEnvironment(envName) + `"
       tier     = "Standard"
       size     = "` + getDefaultSkuForEnvironment(envName) + `"
       capacity = 1
