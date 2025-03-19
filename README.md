@@ -6,6 +6,114 @@ A tool for scaffolding Terraform and Terragrunt projects with standardized struc
 
 Terragrunt-scaffolder (tgs) helps you create and manage infrastructure-as-code projects using Terraform and Terragrunt. It generates a consistent directory structure, configuration files, and naming conventions based on your project specifications.
 
+> **Note**: Currently, this tool only supports Azure cloud provider. Support for other cloud providers may be added in future releases.
+
+## Prerequisites
+
+Before using this tool, ensure you have the following prerequisites installed and configured:
+
+1. **Terraform** (v1.0.0 or later)
+   - Download and install from [Terraform's official website](https://www.terraform.io/downloads.html)
+   - Verify installation: `terraform version`
+
+2. **Terragrunt** (v0.45.0 or later)
+   - Download and install from [Terragrunt's releases page](https://github.com/gruntwork-io/terragrunt/releases)
+   - Verify installation: `terragrunt --version`
+
+3. **Azure Subscription**
+   - An active Azure subscription with appropriate permissions
+   - Azure CLI installed and configured with your subscription
+   - Verify configuration: `az account show`
+
+## Provider Setup
+
+The tool requires proper configuration of the Azure provider to interact with Azure resources. Here's how to set it up:
+
+### Azure Provider Configuration
+
+1. **Install Azure CLI** (if not already installed):
+   ```bash
+   # Windows (PowerShell)
+   winget install -e --id Microsoft.AzureCLI
+
+   # macOS (Homebrew)
+   brew install azure-cli
+
+   # Linux (Ubuntu/Debian)
+   curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+   ```
+
+2. **Login to Azure**:
+   ```bash
+   az login
+   ```
+   This will open a browser window for authentication.
+
+3. **Set the correct subscription**:
+   ```bash
+   # List available subscriptions
+   az account list --output table
+
+   # Set the active subscription
+   az account set --subscription "<subscription-name-or-id>"
+   ```
+
+4. **Create a Service Principal** (for CI/CD or non-interactive use):
+   ```bash
+   # Create the service principal
+   az ad sp create-for-rbac --name "tgs-sp" --role contributor \
+     --scopes /subscriptions/<subscription-id> \
+     --sdk-auth
+
+   # The output will look like this:
+   {
+     "clientId": "<client-id>",
+     "clientSecret": "<client-secret>",
+     "subscriptionId": "<subscription-id>",
+     "tenantId": "<tenant-id>",
+     "activeDirectoryEndpointUrl": "https://login.microsoftonline.com",
+     "resourceManagerEndpointUrl": "https://management.azure.com/",
+     "activeDirectoryGraphResourceId": "https://graph.windows.net/",
+     "sqlManagementEndpointUrl": "https://management.core.windows.net:8443/",
+     "galleryEndpointUrl": "https://gallery.azure.com/",
+     "managementEndpointUrl": "https://management.core.windows.net/"
+   }
+   ```
+
+5. **Configure Environment Variables** (if using service principal):
+   ```bash
+   # Set environment variables
+   export ARM_CLIENT_ID="<client-id>"
+   export ARM_CLIENT_SECRET="<client-secret>"
+   export ARM_SUBSCRIPTION_ID="<subscription-id>"
+   export ARM_TENANT_ID="<tenant-id>"
+   ```
+
+6. **Verify Provider Access**:
+   ```bash
+   # Test Azure CLI authentication
+   az account show
+
+   # Test Terraform provider access
+   terraform init
+   ```
+
+### Provider Version Requirements
+
+The tool uses the following provider versions by default:
+- Azure Provider: `~> 4.22.0`
+
+You can specify a different version in your stack configuration if needed:
+
+```yaml
+stack:
+  components:
+    appservice:
+      source: azurerm_app_service
+      provider: azurerm
+      version: "~> 4.22.0"  # Specify your desired version
+```
+
 ## Directory Structure
 
 The tool uses the following directory structure:
@@ -22,20 +130,40 @@ The tool uses the following directory structure:
 └── .infrastructure/            # Generated infrastructure code
     ├── config/                 # Global configuration
     │   └── global.hcl          # Global variables
+    ├── root.hcl                # Root Terragrunt configuration
     ├── _components/            # Component templates
     │   ├── appservice/         # App Service component
+    │   │   ├── component.hcl   # Component-level configuration
+    │   │   ├── main.tf         # Main Terraform configuration
+    │   │   ├── variables.tf    # Input variables
+    │   │   └── provider.tf     # Provider configuration
     │   ├── rediscache/         # Redis Cache component
+    │   │   ├── component.hcl   # Component-level configuration
+    │   │   ├── main.tf         # Main Terraform configuration
+    │   │   ├── variables.tf    # Input variables
+    │   │   └── provider.tf     # Provider configuration
     │   └── ...                 # Other components
     ├── nonprod/                # Non-production subscription
+    │   ├── subscription.hcl    # Subscription-level configuration
     │   ├── eastus2/            # Region
+    │   │   ├── region.hcl      # Region-level configuration
     │   │   ├── dev/            # Environment
+    │   │   │   ├── environment.hcl  # Environment-level configuration
     │   │   │   ├── appservice/ # Component
+    │   │   │   │   ├── terragrunt.hcl  # App-specific configuration
     │   │   │   │   ├── api/    # App
+    │   │   │   │   │   └── terragrunt.hcl  # App-specific configuration
     │   │   │   │   └── web/    # App
+    │   │   │   │       └── terragrunt.hcl  # App-specific configuration
     │   │   │   └── ...         # Other components
     │   │   └── test/           # Environment
+    │   │       ├── environment.hcl  # Environment-level configuration
+    │   │       └── ...         # Components and apps
     │   └── westus/             # Region
+    │       ├── region.hcl      # Region-level configuration
+    │       └── ...             # Environments and components
     └── prod/                   # Production subscription
+        ├── subscription.hcl    # Subscription-level configuration
         └── ...                 # Similar structure
 ```
 
@@ -237,8 +365,14 @@ See the CLI commands section for details on how to use the tool.
 ```
 tgs init                  # Initialize a new project with tgs.yaml and main.yaml in .tgs directory
 tgs create stack [name]   # Create a new stack configuration in .tgs/stacks directory
+tgs create container      # Create a container in the storage account for remote state
 tgs list                  # List available stacks in .tgs/stacks directory
 tgs generate              # Generate Terragrunt configuration based on tgs.yaml and main.yaml
+tgs plan                  # Show changes that will be applied to the infrastructure
+tgs validate [stack]      # Validate a stack configuration (defaults to main stack)
+tgs validate-config       # Validate the tgs.yaml configuration file
+tgs details [stack]       # Show detailed information about a stack configuration
+tgs diagram              # Generate a Mermaid diagram of the infrastructure layout
 ```
 
 ### Workflow
@@ -255,14 +389,45 @@ tgs generate              # Generate Terragrunt configuration based on tgs.yaml 
    ```
    This creates a new stack configuration file at `.tgs/stacks/dev.yaml`.
 
-3. **List available stacks**:
+3. **Create storage container** (required for remote state):
+   ```
+   tgs create container
+   ```
+   This creates a container in the storage account specified in your `tgs.yaml` for storing Terraform state.
+
+4. **List available stacks**:
    ```
    tgs list
    ```
    This lists all available stacks in the `.tgs/stacks` directory.
 
-4. **Generate the infrastructure**:
+5. **Validate configurations**:
+   ```
+   tgs validate-config    # Validate tgs.yaml
+   tgs validate dev      # Validate a specific stack
+   ```
+   This ensures your configurations are valid before generating infrastructure.
+
+6. **View stack details**:
+   ```
+   tgs details dev
+   ```
+   This shows detailed information about a stack's components, architecture, and dependencies.
+
+7. **Generate infrastructure**:
    ```
    tgs generate
    ```
    This generates the Terragrunt configuration based on the configuration files.
+
+8. **Plan changes**:
+   ```
+   tgs plan
+   ```
+   This shows what changes would be applied to your infrastructure, including additions, removals, and modifications.
+
+9. **Generate diagrams**:
+   ```
+   tgs diagram
+   ```
+   This generates Mermaid diagrams showing the infrastructure layout in the `.infrastructure/diagrams` directory.
