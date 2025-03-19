@@ -1,4 +1,0 @@
-{
-  "opco": "${opco}",
-  "region": "${region}"
-}

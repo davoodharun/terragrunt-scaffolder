@@ -324,6 +324,30 @@ func main() {
 		},
 	}
 
+	// Plan command
+	planCmd := &cobra.Command{
+		Use:   "plan",
+		Short: "Show changes that will be applied to the infrastructure",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Read TGS config first
+			tgsConfig, err := scaffold.ReadTGSConfig()
+			if err != nil {
+				return fmt.Errorf("failed to read TGS config: %w", err)
+			}
+
+			// Validate tgs.yaml first
+			if errors := validate.ValidateTGSConfig(tgsConfig); len(errors) > 0 {
+				fmt.Println("TGS configuration validation failed:")
+				for _, err := range errors {
+					fmt.Printf("  - %v\n", err)
+				}
+				return fmt.Errorf("tgs.yaml validation failed with %d errors", len(errors))
+			}
+
+			return scaffold.Plan()
+		},
+	}
+
 	// Add subcommands to create command
 	createCmd.AddCommand(createStackCmd)
 	createCmd.AddCommand(createContainerCmd)
@@ -337,6 +361,7 @@ func main() {
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(validateTGSCmd)
 	rootCmd.AddCommand(detailsCmd)
+	rootCmd.AddCommand(planCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

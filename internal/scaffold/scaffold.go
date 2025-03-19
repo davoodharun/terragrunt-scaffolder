@@ -104,15 +104,31 @@ func Generate() error {
 	infraPath := ".infrastructure"
 	logger.Info("Using infrastructure path: %s", infraPath)
 
-	// Create infrastructure directory
-	if err := os.MkdirAll(infraPath, 0755); err != nil {
-		return fmt.Errorf("failed to create infrastructure directory: %w", err)
-	}
-
 	// Read TGS config
 	tgsConfig, err := ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
+	}
+
+	// Track existing and planned subscriptions
+	existingSubs := make(map[string]bool)
+	plannedSubs := make(map[string]bool)
+
+	// Track all components that will be used
+	plannedComponents := make(map[string]bool)
+
+	// Get existing subscriptions (excluding special directories)
+	if entries, err := os.ReadDir(infraPath); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), "_") && !strings.HasPrefix(entry.Name(), ".") && entry.Name() != "config" && entry.Name() != "diagrams" {
+				existingSubs[entry.Name()] = true
+			}
+		}
+	}
+
+	// Create infrastructure directory if it doesn't exist
+	if err := os.MkdirAll(infraPath, 0755); err != nil {
+		return fmt.Errorf("failed to create infrastructure directory: %w", err)
 	}
 
 	// Create base directory structure
@@ -134,9 +150,68 @@ func Generate() error {
 	// Track processed stacks to avoid duplicate component generation
 	processedStacks := make(map[string]bool)
 
+	// First pass: collect all components that will be used
+	for _, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
+			}
+
+			mainConfig, err := readMainConfig(stackName)
+			if err != nil {
+				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+			}
+
+			// Mark all components in this stack as planned
+			for compName := range mainConfig.Stack.Components {
+				plannedComponents[compName] = true
+			}
+		}
+	}
+
+	// Clean up unused components in _components directory
+	componentsDir := filepath.Join(baseDir, "_components")
+	if entries, err := os.ReadDir(componentsDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && !plannedComponents[entry.Name()] {
+				componentPath := filepath.Join(componentsDir, entry.Name())
+				logger.Info("Removing unused component directory: %s", componentPath)
+				if err := os.RemoveAll(componentPath); err != nil {
+					logger.Warning("Failed to remove component directory: %v", err)
+				}
+			}
+		}
+	}
+
 	// Create subscription directories and configs
 	for subName, sub := range tgsConfig.Subscriptions {
+		plannedSubs[subName] = true
 		subPath := filepath.Join(baseDir, subName)
+
+		// Track existing and planned environments for this subscription
+		existingEnvs := make(map[string]map[string]bool) // map[region]map[env]bool
+		plannedEnvs := make(map[string]map[string]bool)  // map[region]map[env]bool
+
+		// Get existing environments
+		if regions, err := os.ReadDir(subPath); err == nil {
+			for _, region := range regions {
+				if region.IsDir() {
+					regionPath := filepath.Join(subPath, region.Name())
+					if envs, err := os.ReadDir(regionPath); err == nil {
+						if existingEnvs[region.Name()] == nil {
+							existingEnvs[region.Name()] = make(map[string]bool)
+						}
+						for _, env := range envs {
+							if env.IsDir() {
+								existingEnvs[region.Name()][env.Name()] = true
+							}
+						}
+					}
+				}
+			}
+		}
+
 		if err := os.MkdirAll(subPath, 0755); err != nil {
 			return fmt.Errorf("failed to create subscription directory: %w", err)
 		}
@@ -148,7 +223,6 @@ func Generate() error {
 
 		// Process each environment with its specified stack
 		for _, env := range sub.Environments {
-			// Use the stack specified in the environment config, default to "main" if not specified
 			stackName := "main"
 			if env.Stack != "" {
 				stackName = env.Stack
@@ -177,7 +251,22 @@ func Generate() error {
 			}
 
 			// Create region directories and their contents
-			for region, _ := range mainConfig.Stack.Architecture.Regions {
+			for region := range mainConfig.Stack.Architecture.Regions {
+				// Initialize planned environments map for this region
+				if plannedEnvs[region] == nil {
+					plannedEnvs[region] = make(map[string]bool)
+				}
+				plannedEnvs[region][env.Name] = true
+
+				// Remove existing environment directory if it exists (to handle stack changes)
+				envPath := filepath.Join(subPath, region, env.Name)
+				if _, err := os.Stat(envPath); err == nil {
+					logger.Info("Removing existing environment directory for stack change: %s", envPath)
+					if err := os.RemoveAll(envPath); err != nil {
+						logger.Warning("Failed to remove environment directory: %v", err)
+					}
+				}
+
 				regionPath := filepath.Join(subPath, region)
 				if err := os.MkdirAll(regionPath, 0755); err != nil {
 					return fmt.Errorf("failed to create region directory: %w", err)
@@ -192,6 +281,30 @@ func Generate() error {
 				if err := generateEnvironment(subName, region, env, mainConfig); err != nil {
 					return fmt.Errorf("failed to generate environment: %w", err)
 				}
+			}
+		}
+
+		// Remove environments that are no longer in the configuration
+		for region, envs := range existingEnvs {
+			for env := range envs {
+				if plannedEnvs[region] == nil || !plannedEnvs[region][env] {
+					envPath := filepath.Join(subPath, region, env)
+					logger.Info("Removing environment directory: %s", envPath)
+					if err := os.RemoveAll(envPath); err != nil {
+						logger.Warning("Failed to remove environment directory: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	// Remove subscriptions that are no longer in the configuration
+	for existingSub := range existingSubs {
+		if !plannedSubs[existingSub] {
+			subPath := filepath.Join(baseDir, existingSub)
+			logger.Info("Removing subscription directory: %s", subPath)
+			if err := os.RemoveAll(subPath); err != nil {
+				logger.Warning("Failed to remove subscription directory: %v", err)
 			}
 		}
 	}
