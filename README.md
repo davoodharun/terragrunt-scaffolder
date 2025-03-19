@@ -8,6 +8,89 @@ Terragrunt-scaffolder (tgs) helps you create and manage infrastructure-as-code p
 
 > **Note**: Currently, this tool only supports Azure cloud provider. Support for other cloud providers may be added in future releases.
 
+> **Important**: Before starting, ensure you have an Azure Storage Account created in your subscription. This storage account will be used to store Terraform state files. The storage account should be in a resource group that follows your organization's naming conventions.
+
+## Quick Start
+
+1. **Install the tool**:
+   ```bash
+   # Download the latest release from GitHub
+   # For Windows (PowerShell):
+   Invoke-WebRequest -Uri "https://github.com/davoodharun/terragrunt-scaffolder/releases/latest/download/tgs-windows-amd64.exe" -OutFile "tgs.exe"
+   Move-Item tgs.exe $env:LOCALAPPDATA\Microsoft\WindowsApps
+
+   # For macOS/Linux:
+   curl -L https://github.com/davoodharun/terragrunt-scaffolder/releases/latest/download/tgs-linux-amd64 -o tgs
+   chmod +x tgs
+   sudo mv tgs /usr/local/bin/
+   ```
+
+2. **Authenticate with Azure**:
+   ```bash
+   # Login to Azure
+   az login
+
+   # List available subscriptions
+   az account list --output table
+
+   # Set the active subscription
+   az account set --subscription "<subscription-name-or-id>"
+
+   # Verify the current subscription
+   az account show
+   ```
+
+3. **Initialize a new project**:
+   ```bash
+   # Create a new directory for your project
+   mkdir my-infrastructure
+   cd my-infrastructure
+
+   # Initialize the project with default configuration
+   tgs init
+   ```
+   This creates the `.tgs` directory with a default `tgs.yaml` file and a default `main.yaml` stack.
+
+4. **Configure your project**:
+   - Edit `.tgs/tgs.yaml` to set your project name and Azure subscription details
+   - Edit `.tgs/stacks/main.yaml` to define your infrastructure components
+
+5. **Generate the infrastructure**:
+   ```bash
+   tgs generate
+   ```
+   This creates the Terragrunt configuration in the `.infrastructure` directory.
+
+6. **Create the storage container**:
+   ```bash
+   tgs create container
+   ```
+   This creates a container in your Azure storage account for storing Terraform state.
+
+7. **Initialize Terragrunt**:
+   ```bash
+   # Navigate to the infrastructure directory
+   cd .infrastructure
+
+   # Initialize Terragrunt for all components
+   terragrunt run-all init
+
+   # Or initialize a specific component (e.g., appservice in dev environment)
+   cd nonprod/eastus2/dev/appservice
+   terragrunt init
+   ```
+   This initializes the Terraform working directory and downloads required providers.
+
+8. **Plan your changes**:
+   ```bash
+   # Plan all components
+   terragrunt run-all plan
+
+   # Or plan a specific component
+   terragrunt plan
+   ```
+   This shows what changes will be applied to your infrastructure.
+
 ## Prerequisites
 
 Before using this tool, ensure you have the following prerequisites installed and configured:
