@@ -3,6 +3,7 @@ package scaffold
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -25,9 +26,12 @@ type Change struct {
 func Plan() error {
 	logger.Info("Analyzing infrastructure changes...")
 
-	// Check if .infrastructure directory exists
-	if _, err := os.Stat(".infrastructure"); os.IsNotExist(err) {
-		return fmt.Errorf("no existing infrastructure found. Use 'generate' to create initial infrastructure")
+	// Verify Azure authentication
+	logger.Info("Verifying Azure authentication...")
+	if err := verifyAzureAuth(); err != nil {
+		logger.Warning("Azure authentication verification failed: %v\nPlease run 'az login' to authenticate with Azure", err)
+	} else {
+		logger.Success("Azure authentication verified")
 	}
 
 	// Read TGS config
@@ -39,86 +43,40 @@ func Plan() error {
 	// Track all changes
 	var changes []Change
 
-	// Get existing subscriptions from .infrastructure directory
-	entries, err := os.ReadDir(".infrastructure")
-	if err != nil {
-		return fmt.Errorf("failed to read infrastructure directory: %w", err)
+	// Check if .infrastructure directory exists
+	infraExists := false
+	if _, err := os.Stat(".infrastructure"); err == nil {
+		infraExists = true
 	}
 
-	// Track existing and planned subscriptions
-	existingSubs := make(map[string]bool)
-	plannedSubs := make(map[string]bool)
+	if !infraExists {
+		// If infrastructure doesn't exist, show what would be created
+		logger.Info("No existing infrastructure found. This will create a new infrastructure with the following structure:")
 
-	// Find existing subscriptions (excluding special directories)
-	for _, entry := range entries {
-		if entry.IsDir() && !strings.HasPrefix(entry.Name(), "_") && !strings.HasPrefix(entry.Name(), ".") && entry.Name() != "config" && entry.Name() != "diagrams" {
-			existingSubs[entry.Name()] = true
-		}
-	}
-
-	// Process planned subscriptions and their contents
-	for subName, sub := range tgsConfig.Subscriptions {
-		plannedSubs[subName] = true
-
-		// Check if this is a new subscription
-		if !existingSubs[subName] {
+		// Add changes for all planned subscriptions
+		for subName, sub := range tgsConfig.Subscriptions {
 			changes = append(changes, Change{
 				Type:         "add",
 				Category:     "subscription",
 				Subscription: subName,
 				Details:      fmt.Sprintf("New subscription will be created"),
 			})
-			continue
-		}
 
-		// Get existing environments for this subscription
-		subPath := filepath.Join(".infrastructure", subName)
-		existingEnvs := make(map[string]map[string]bool) // map[region]map[env]bool
-
-		// Read regions in the subscription
-		regions, err := os.ReadDir(subPath)
-		if err == nil {
-			for _, region := range regions {
-				if region.IsDir() {
-					regionPath := filepath.Join(subPath, region.Name())
-					envs, err := os.ReadDir(regionPath)
-					if err == nil {
-						if existingEnvs[region.Name()] == nil {
-							existingEnvs[region.Name()] = make(map[string]bool)
-						}
-						for _, env := range envs {
-							if env.IsDir() {
-								existingEnvs[region.Name()][env.Name()] = true
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// Process each environment with its specified stack
-		for _, env := range sub.Environments {
-			stackName := "main"
-			if env.Stack != "" {
-				stackName = env.Stack
-			}
-
-			// Read the stack configuration
-			mainConfig, err := readMainConfig(stackName)
-			if err != nil {
-				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
-			}
-
-			// Compare components and apps in each region
-			for region, components := range mainConfig.Stack.Architecture.Regions {
-				// Remove environment from existing map to track removals
-				if existingEnvs[region] != nil {
-					delete(existingEnvs[region], env.Name)
+			// Process each environment with its specified stack
+			for _, env := range sub.Environments {
+				stackName := "main"
+				if env.Stack != "" {
+					stackName = env.Stack
 				}
 
-				// Check if this environment exists in this region
-				envPath := filepath.Join(".infrastructure", subName, region, env.Name)
-				if _, err := os.Stat(envPath); os.IsNotExist(err) {
+				// Read the stack configuration
+				mainConfig, err := readMainConfig(stackName)
+				if err != nil {
+					return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+				}
+
+				// Add changes for each region and component
+				for region, components := range mainConfig.Stack.Architecture.Regions {
 					changes = append(changes, Change{
 						Type:         "add",
 						Category:     "environment",
@@ -127,24 +85,9 @@ func Plan() error {
 						Region:       region,
 						Details:      fmt.Sprintf("New environment will be created"),
 					})
-					continue
-				}
 
-				// Track planned components
-				plannedComponents := make(map[string]bool)
-
-				// Check for new or modified components
-				for _, comp := range components {
-					plannedComponents[comp.Component] = true
-
-					// Check if component directory exists
-					componentPath := filepath.Join(envPath, comp.Component)
-					componentExists := false
-					if _, err := os.Stat(componentPath); err == nil {
-						componentExists = true
-					}
-
-					if !componentExists {
+					// Add changes for each component
+					for _, comp := range components {
 						changes = append(changes, Change{
 							Type:         "add",
 							Category:     "component",
@@ -154,25 +97,10 @@ func Plan() error {
 							Subscription: subName,
 							Details:      fmt.Sprintf("New component will be created"),
 						})
-						continue
-					}
 
-					// Compare apps if component exists
-					if len(comp.Apps) > 0 {
-						existingApps := make(map[string]bool)
-						// Read existing app directories
-						entries, err := os.ReadDir(componentPath)
-						if err == nil {
-							for _, entry := range entries {
-								if entry.IsDir() {
-									existingApps[entry.Name()] = true
-								}
-							}
-						}
-
-						// Check for new apps
-						for _, app := range comp.Apps {
-							if !existingApps[app] {
+						// Add changes for each app if specified
+						if len(comp.Apps) > 0 {
+							for _, app := range comp.Apps {
 								changes = append(changes, Change{
 									Type:         "add",
 									Category:     "app",
@@ -185,91 +113,246 @@ func Plan() error {
 								})
 							}
 						}
+					}
+				}
+			}
+		}
+	} else {
+		// Track all changes
+		var changes []Change
 
-						// Check for removed apps
-						for existingApp := range existingApps {
-							found := false
-							for _, plannedApp := range comp.Apps {
-								if plannedApp == existingApp {
-									found = true
-									break
+		// Get existing subscriptions from .infrastructure directory
+		entries, err := os.ReadDir(".infrastructure")
+		if err != nil {
+			return fmt.Errorf("failed to read infrastructure directory: %w", err)
+		}
+
+		// Track existing and planned subscriptions
+		existingSubs := make(map[string]bool)
+		plannedSubs := make(map[string]bool)
+
+		// Find existing subscriptions (excluding special directories)
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), "_") && !strings.HasPrefix(entry.Name(), ".") && entry.Name() != "config" && entry.Name() != "diagrams" {
+				existingSubs[entry.Name()] = true
+			}
+		}
+
+		// Process planned subscriptions and their contents
+		for subName, sub := range tgsConfig.Subscriptions {
+			plannedSubs[subName] = true
+
+			// Check if this is a new subscription
+			if !existingSubs[subName] {
+				changes = append(changes, Change{
+					Type:         "add",
+					Category:     "subscription",
+					Subscription: subName,
+					Details:      fmt.Sprintf("New subscription will be created"),
+				})
+				continue
+			}
+
+			// Get existing environments for this subscription
+			subPath := filepath.Join(".infrastructure", subName)
+			existingEnvs := make(map[string]map[string]bool) // map[region]map[env]bool
+
+			// Read regions in the subscription
+			regions, err := os.ReadDir(subPath)
+			if err == nil {
+				for _, region := range regions {
+					if region.IsDir() {
+						regionPath := filepath.Join(subPath, region.Name())
+						envs, err := os.ReadDir(regionPath)
+						if err == nil {
+							if existingEnvs[region.Name()] == nil {
+								existingEnvs[region.Name()] = make(map[string]bool)
+							}
+							for _, env := range envs {
+								if env.IsDir() {
+									existingEnvs[region.Name()][env.Name()] = true
 								}
 							}
-							if !found {
+						}
+					}
+				}
+			}
+
+			// Process each environment with its specified stack
+			for _, env := range sub.Environments {
+				stackName := "main"
+				if env.Stack != "" {
+					stackName = env.Stack
+				}
+
+				// Read the stack configuration
+				mainConfig, err := readMainConfig(stackName)
+				if err != nil {
+					return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+				}
+
+				// Compare components and apps in each region
+				for region, components := range mainConfig.Stack.Architecture.Regions {
+					// Remove environment from existing map to track removals
+					if existingEnvs[region] != nil {
+						delete(existingEnvs[region], env.Name)
+					}
+
+					// Check if this environment exists in this region
+					envPath := filepath.Join(".infrastructure", subName, region, env.Name)
+					if _, err := os.Stat(envPath); os.IsNotExist(err) {
+						changes = append(changes, Change{
+							Type:         "add",
+							Category:     "environment",
+							Subscription: subName,
+							Environment:  env.Name,
+							Region:       region,
+							Details:      fmt.Sprintf("New environment will be created"),
+						})
+						continue
+					}
+
+					// Track planned components
+					plannedComponents := make(map[string]bool)
+
+					// Check for new or modified components
+					for _, comp := range components {
+						plannedComponents[comp.Component] = true
+
+						// Check if component directory exists
+						componentPath := filepath.Join(envPath, comp.Component)
+						componentExists := false
+						if _, err := os.Stat(componentPath); err == nil {
+							componentExists = true
+						}
+
+						if !componentExists {
+							changes = append(changes, Change{
+								Type:         "add",
+								Category:     "component",
+								Component:    comp.Component,
+								Region:       region,
+								Environment:  env.Name,
+								Subscription: subName,
+								Details:      fmt.Sprintf("New component will be created"),
+							})
+							continue
+						}
+
+						// Compare apps if component exists
+						if len(comp.Apps) > 0 {
+							existingApps := make(map[string]bool)
+							// Read existing app directories
+							entries, err := os.ReadDir(componentPath)
+							if err == nil {
+								for _, entry := range entries {
+									if entry.IsDir() {
+										existingApps[entry.Name()] = true
+									}
+								}
+							}
+
+							// Check for new apps
+							for _, app := range comp.Apps {
+								if !existingApps[app] {
+									changes = append(changes, Change{
+										Type:         "add",
+										Category:     "app",
+										Component:    comp.Component,
+										App:          app,
+										Region:       region,
+										Environment:  env.Name,
+										Subscription: subName,
+										Details:      fmt.Sprintf("New application instance will be created"),
+									})
+								}
+							}
+
+							// Check for removed apps
+							for existingApp := range existingApps {
+								found := false
+								for _, plannedApp := range comp.Apps {
+									if plannedApp == existingApp {
+										found = true
+										break
+									}
+								}
+								if !found {
+									changes = append(changes, Change{
+										Type:         "remove",
+										Category:     "app",
+										Component:    comp.Component,
+										App:          existingApp,
+										Region:       region,
+										Environment:  env.Name,
+										Subscription: subName,
+										Details:      fmt.Sprintf("Application instance will be removed"),
+									})
+								}
+							}
+						}
+
+						// Check for configuration changes
+						if configChanges := checkComponentConfigChanges(mainConfig.Stack.Components[comp.Component], componentPath); len(configChanges) > 0 {
+							for _, detail := range configChanges {
 								changes = append(changes, Change{
-									Type:         "remove",
-									Category:     "app",
+									Type:         "modify",
+									Category:     "config",
 									Component:    comp.Component,
-									App:          existingApp,
 									Region:       region,
 									Environment:  env.Name,
 									Subscription: subName,
-									Details:      fmt.Sprintf("Application instance will be removed"),
+									Details:      detail,
 								})
 							}
 						}
 					}
 
-					// Check for configuration changes
-					if configChanges := checkComponentConfigChanges(mainConfig.Stack.Components[comp.Component], componentPath); len(configChanges) > 0 {
-						for _, detail := range configChanges {
-							changes = append(changes, Change{
-								Type:         "modify",
-								Category:     "config",
-								Component:    comp.Component,
-								Region:       region,
-								Environment:  env.Name,
-								Subscription: subName,
-								Details:      detail,
-							})
+					// Check for removed components
+					entries, err := os.ReadDir(envPath)
+					if err == nil {
+						for _, entry := range entries {
+							if entry.IsDir() && !plannedComponents[entry.Name()] {
+								changes = append(changes, Change{
+									Type:         "remove",
+									Category:     "component",
+									Component:    entry.Name(),
+									Region:       region,
+									Environment:  env.Name,
+									Subscription: subName,
+									Details:      fmt.Sprintf("Component will be removed"),
+								})
+							}
 						}
 					}
 				}
 
-				// Check for removed components
-				entries, err := os.ReadDir(envPath)
-				if err == nil {
-					for _, entry := range entries {
-						if entry.IsDir() && !plannedComponents[entry.Name()] {
-							changes = append(changes, Change{
-								Type:         "remove",
-								Category:     "component",
-								Component:    entry.Name(),
-								Region:       region,
-								Environment:  env.Name,
-								Subscription: subName,
-								Details:      fmt.Sprintf("Component will be removed"),
-							})
-						}
+				// Add changes for environments that will be removed
+				for region, envs := range existingEnvs {
+					for env := range envs {
+						changes = append(changes, Change{
+							Type:         "remove",
+							Category:     "environment",
+							Subscription: subName,
+							Environment:  env,
+							Region:       region,
+							Details:      fmt.Sprintf("Environment will be removed"),
+						})
 					}
 				}
 			}
-		}
 
-		// Add changes for environments that will be removed
-		for region, envs := range existingEnvs {
-			for env := range envs {
-				changes = append(changes, Change{
-					Type:         "remove",
-					Category:     "environment",
-					Subscription: subName,
-					Environment:  env,
-					Region:       region,
-					Details:      fmt.Sprintf("Environment will be removed"),
-				})
+			// Check for removed subscriptions
+			for existingSub := range existingSubs {
+				if !plannedSubs[existingSub] {
+					changes = append(changes, Change{
+						Type:         "remove",
+						Category:     "subscription",
+						Subscription: existingSub,
+						Details:      fmt.Sprintf("Subscription will be removed"),
+					})
+				}
 			}
-		}
-	}
-
-	// Check for removed subscriptions
-	for existingSub := range existingSubs {
-		if !plannedSubs[existingSub] {
-			changes = append(changes, Change{
-				Type:         "remove",
-				Category:     "subscription",
-				Subscription: existingSub,
-				Details:      fmt.Sprintf("Subscription will be removed"),
-			})
 		}
 	}
 
@@ -343,6 +426,55 @@ func Plan() error {
 				}
 			}
 		}
+	}
+
+	return nil
+}
+
+// verifyAzureAuth checks if the user is properly authenticated with Azure
+func verifyAzureAuth() error {
+	// Create a temporary directory for terraform schema cache
+	tmpDir, err := os.MkdirTemp("", "tf-schema-cache")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a temporary terraform configuration to test authentication
+	testConfig := `
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+}
+
+data "azurerm_client_config" "current" {}
+`
+
+	// Write the test configuration
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.tf"), []byte(testConfig), 0644); err != nil {
+		return fmt.Errorf("failed to write test configuration: %w", err)
+	}
+
+	// Initialize terraform in the temporary directory
+	cmd := exec.Command("terraform", "init")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("terraform init failed: %s\n%s", err, output)
+	}
+
+	// Try to read the client config
+	cmd = exec.Command("terraform", "plan", "-out=tfplan")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("terraform plan failed: %s\n%s", err, output)
 	}
 
 	return nil
