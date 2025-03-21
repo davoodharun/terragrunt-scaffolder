@@ -51,14 +51,14 @@ jobs:
         mkdir -p dist
         
         # Build for Windows
-        GOOS=windows GOARCH=amd64 go build -o ./dist/tgs-windows-amd64.exe ./cmd/tgs
+        GOOS=windows GOARCH=amd64 go build -ldflags="-X main.Version=${{ steps.version.outputs.new_version }}" -o ./dist/tgs-windows-amd64.exe ./cmd/tgs
         
         # Build for Linux
-        GOOS=linux GOARCH=amd64 go build -o ./dist/tgs-linux-amd64 ./cmd/tgs
+        GOOS=linux GOARCH=amd64 go build -ldflags="-X main.Version=${{ steps.version.outputs.new_version }}" -o ./dist/tgs-linux-amd64 ./cmd/tgs
         
         # Build for macOS
-        GOOS=darwin GOARCH=amd64 go build -o ./dist/tgs-darwin-amd64 ./cmd/tgs
-        GOOS=darwin GOARCH=arm64 go build -o ./dist/tgs-darwin-arm64 ./cmd/tgs
+        GOOS=darwin GOARCH=amd64 go build -ldflags="-X main.Version=${{ steps.version.outputs.new_version }}" -o ./dist/tgs-darwin-amd64 ./cmd/tgs
+        GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.Version=${{ steps.version.outputs.new_version }}" -o ./dist/tgs-darwin-arm64 ./cmd/tgs
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
