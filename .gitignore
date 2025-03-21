@@ -2,3 +2,7 @@
 
 # Code Editor settings
 .vscode/
+tgs.exe
+.tgs/
+.azuredevops/
+.infrastructure/

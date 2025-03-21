@@ -305,6 +305,12 @@ stages:
 
 	// Add stages
 	for _, stage := range stages {
+		// Format dependsOn as an array
+		dependsOn := "[]"
+		if len(stage.DependsOn) > 0 {
+			dependsOn = fmt.Sprintf("[%s]", strings.Join(stage.DependsOn, ", "))
+		}
+
 		pipeline.WriteString(fmt.Sprintf(`  - stage: %s
     displayName: Deploy %s
     dependsOn: %s
@@ -320,12 +326,12 @@ stages:
               region: %s
               env: %s
               sub: %s
-`, stage.Name, stage.Name, strings.Join(stage.DependsOn, ", "),
+`, stage.Name, stage.Name, dependsOn,
 			stage.Parameters["component"], stage.Parameters["region"],
 			stage.Parameters["env"], stage.Parameters["sub"]))
 
 		if app, ok := stage.Parameters["app"].(string); ok && app != "" {
-			pipeline.WriteString(fmt.Sprintf(`          app: %s
+			pipeline.WriteString(fmt.Sprintf(`              app: %s
 `, app))
 		}
 
