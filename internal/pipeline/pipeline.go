@@ -313,12 +313,13 @@ stages:
         displayName: Deploy Infrastructure
         pool:
           vmImage: ubuntu-latest
-        template: component-deploy.yml
-        parameters:
-          component: %s
-          region: %s
-          env: %s
-          sub: %s
+        steps:
+          - template: component-deploy.yml
+            parameters:
+              component: %s
+              region: %s
+              env: %s
+              sub: %s
 `, stage.Name, stage.Name, strings.Join(stage.DependsOn, ", "),
 			stage.Parameters["component"], stage.Parameters["region"],
 			stage.Parameters["env"], stage.Parameters["sub"]))
