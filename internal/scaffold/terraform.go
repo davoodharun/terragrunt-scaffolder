@@ -101,3 +101,22 @@ variable "tags" {
 
 	return nil
 }
+
+func generateProviderTF(comp config.Component) string {
+	return fmt.Sprintf(`terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "%s"
+    }
+  }
+}
+
+provider "azurerm" {
+  	features {}
+	skip_provider_registration = true
+}
+
+data "azurerm_client_config" "current" {}
+`, comp.Version)
+}

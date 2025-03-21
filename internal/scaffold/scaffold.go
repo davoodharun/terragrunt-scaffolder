@@ -268,6 +268,11 @@ func Generate() error {
 					return fmt.Errorf("failed to generate components for stack %s: %w", stackName, err)
 				}
 
+				// Generate basic Terraform files for components
+				if err := generateComponents(mainConfig); err != nil {
+					return fmt.Errorf("failed to generate basic Terraform files for stack %s: %w", stackName, err)
+				}
+
 				processedStacks[stackName] = true
 			}
 
@@ -813,25 +818,6 @@ func convertType(tfType interface{}) string {
 	default:
 		return "any"
 	}
-}
-
-func generateProviderTF(comp config.Component) string {
-	return fmt.Sprintf(`terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "%s"
-    }
-  }
-}
-
-provider "azurerm" {
-  	features {}
-	resource_provider_registrations = "none"
-}
-
-data "azurerm_client_config" "current" {}
-`, comp.Version)
 }
 
 func sanitizeDescription(desc string) string {
