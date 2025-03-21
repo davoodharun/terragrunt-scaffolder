@@ -243,11 +243,11 @@ case "$6" in
     terragrunt plan
     ;;
   "apply")
-    terragrunt plan -auto-approve
-    terragrunt apply -auto-approve
+    terragrunt plan --auto-approve
+    terragrunt apply --auto-approve
     ;;
   "destroy")
-    terragrunt destroy -auto-approve
+    terragrunt destroy --auto-approve
     ;;
   *)
     echo "Invalid runMode: $6"
