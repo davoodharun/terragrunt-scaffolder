@@ -218,6 +218,47 @@ func GeneratePipelineTemplates() error {
 		return fmt.Errorf("failed to create .azuredevops directory: %w", err)
 	}
 
+	// Create .azuredevops/scripts directory
+	if err := os.MkdirAll(".azuredevops/scripts", 0755); err != nil {
+		return fmt.Errorf("failed to create .azuredevops/scripts directory: %w", err)
+	}
+
+	// Create deploy.sh script
+	deployScript := `#!/bin/bash
+set -e
+
+# Set the working directory
+if [ -n "$1" ]; then
+  cd .infrastructure/$2/$3/$4/$5/$1
+else
+  cd .infrastructure/$2/$3/$4/$5
+fi
+
+# Always run init
+terragrunt init
+
+# Run the appropriate command based on runMode
+case "$6" in
+  "plan")
+    terragrunt plan
+    ;;
+  "apply")
+    terragrunt plan -auto-approve
+    terragrunt apply -auto-approve
+    ;;
+  "destroy")
+    terragrunt destroy -auto-approve
+    ;;
+  *)
+    echo "Invalid runMode: $6"
+    exit 1
+    ;;
+esac`
+
+	if err := os.WriteFile(".azuredevops/scripts/deploy.sh", []byte(deployScript), 0755); err != nil {
+		return fmt.Errorf("failed to create deploy.sh script: %w", err)
+	}
+
 	// Analyze infrastructure
 	envComponents, err := AnalyzeInfrastructure()
 	if err != nil {
@@ -286,27 +327,9 @@ steps:
     displayName: Install Terraform and Terragrunt
 
   - script: |
-      cd .infrastructure/${{ parameters.sub }}/${{ parameters.region }}/${{ parameters.env }}/${{ parameters.component }}
-      terragrunt init
-      ${{ eq(parameters.runMode, 'plan') && 'terragrunt plan' || '' }}
-      ${{ eq(parameters.runMode, 'apply') && 'terragrunt plan -auto-approve && terragrunt apply -auto-approve' || '' }}
-      ${{ eq(parameters.runMode, 'destroy') && 'terragrunt destroy -auto-approve' || '' }}
+      chmod +x .azuredevops/scripts/deploy.sh
+      .azuredevops/scripts/deploy.sh "${{ parameters.app }}" "${{ parameters.sub }}" "${{ parameters.region }}" "${{ parameters.env }}" "${{ parameters.component }}" "${{ parameters.runMode }}"
     displayName: Deploy Infrastructure
-    condition: eq('${{ parameters.app }}', '')
-    env:
-      ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-      ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
-      ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
-      ARM_TENANT_ID: $(ARM_TENANT_ID)
-
-  - script: |
-      cd .infrastructure/${{ parameters.sub }}/${{ parameters.region }}/${{ parameters.env }}/${{ parameters.component }}/${{ parameters.app }}
-      terragrunt init
-      ${{ eq(parameters.runMode, 'plan') && 'terragrunt plan' || '' }}
-      ${{ eq(parameters.runMode, 'apply') && 'terragrunt plan -auto-approve && terragrunt apply -auto-approve' || '' }}
-      ${{ eq(parameters.runMode, 'destroy') && 'terragrunt destroy -auto-approve' || '' }}
-    displayName: Deploy Infrastructure
-    condition: ne('${{ parameters.app }}', '')
     env:
       ARM_CLIENT_ID: $(ARM_CLIENT_ID)
       ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
