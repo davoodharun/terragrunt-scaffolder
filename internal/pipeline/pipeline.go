@@ -253,6 +253,19 @@ func generateDeploymentTemplate() error {
   - name: app
     type: string
     default: ''
+  - name: terraform_version
+    type: string
+    default: '1.11.2'
+  - name: terragrunt_version
+    type: string
+    default: 'v0.69.10'
+  - name: runMode
+    type: string
+    default: 'apply'
+    values:
+      - plan
+      - apply
+      - destroy
 
 steps:
   - task: UsePythonVersion@0
@@ -261,16 +274,39 @@ steps:
       addToPath: true
 
   - script: |
-      python -m pip install --upgrade pip
-      pip install terragrunt
-    displayName: Install Terragrunt
+      # Install Terraform
+      wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+      echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+      sudo apt update && sudo apt install -y terraform=${{ parameters.terraform_version }}
+
+      # Install Terragrunt
+      wget https://github.com/gruntwork-io/terragrunt/releases/download/${{ parameters.terragrunt_version }}/terragrunt_linux_amd64
+      chmod +x terragrunt_linux_amd64
+      sudo mv terragrunt_linux_amd64 /usr/local/bin/terragrunt
+    displayName: Install Terraform and Terragrunt
 
   - script: |
-      cd ${{ parameters.component }}
+      cd .infrastructure/${{ parameters.sub }}/${{ parameters.region }}/${{ parameters.env }}/${{ parameters.component }}
       terragrunt init
-      terragrunt plan -auto-approve
-      terragrunt apply -auto-approve
+      ${{ eq(parameters.runMode, 'plan') && 'terragrunt plan' || '' }}
+      ${{ eq(parameters.runMode, 'apply') && 'terragrunt plan -auto-approve && terragrunt apply -auto-approve' || '' }}
+      ${{ eq(parameters.runMode, 'destroy') && 'terragrunt destroy -auto-approve' || '' }}
     displayName: Deploy Infrastructure
+    condition: eq('${{ parameters.app }}', '')
+    env:
+      ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+      ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+      ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+      ARM_TENANT_ID: $(ARM_TENANT_ID)
+
+  - script: |
+      cd .infrastructure/${{ parameters.sub }}/${{ parameters.region }}/${{ parameters.env }}/${{ parameters.component }}/${{ parameters.app }}
+      terragrunt init
+      ${{ eq(parameters.runMode, 'plan') && 'terragrunt plan' || '' }}
+      ${{ eq(parameters.runMode, 'apply') && 'terragrunt plan -auto-approve && terragrunt apply -auto-approve' || '' }}
+      ${{ eq(parameters.runMode, 'destroy') && 'terragrunt destroy -auto-approve' || '' }}
+    displayName: Deploy Infrastructure
+    condition: ne('${{ parameters.app }}', '')
     env:
       ARM_CLIENT_ID: $(ARM_CLIENT_ID)
       ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
@@ -288,7 +324,17 @@ func generateEnvironmentPipeline(envName string, components []Component) error {
 
 	// Generate pipeline YAML
 	var pipeline strings.Builder
-	pipeline.WriteString(fmt.Sprintf(`trigger:
+	pipeline.WriteString(fmt.Sprintf(`parameters:
+  - name: runMode
+    displayName: Run Mode
+    type: string
+    default: 'apply'
+    values:
+      - plan
+      - apply
+      - destroy
+
+trigger:
   branches:
     include:
       - main
@@ -299,6 +345,10 @@ func generateEnvironmentPipeline(envName string, components []Component) error {
 
 variables:
   - group: terraform-variables
+  - name: terraform_version
+    value: '1.11.2'
+  - name: terragrunt_version
+    value: 'v0.69.10'
 
 stages:
 `))
@@ -326,6 +376,9 @@ stages:
               region: %s
               env: %s
               sub: %s
+              terraform_version: $(terraform_version)
+              terragrunt_version: $(terragrunt_version)
+              runMode: ${{ parameters.runMode }}
 `, stage.Name, stage.Name, dependsOn,
 			stage.Parameters["component"], stage.Parameters["region"],
 			stage.Parameters["env"], stage.Parameters["sub"]))
