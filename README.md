@@ -27,20 +27,41 @@ Terragrunt-scaffolder (tgs) helps you create and manage infrastructure-as-code p
 
 2. **Authenticate with Azure**:
    ```bash
-   # Login to Azure
+   # Interactive login (opens browser)
    az login
 
+   # or to use a device code (needed for managing multiple sessions/profiles)
+   az login --use-device-code
+
+   # OR using service principal
+   az login --service-principal \
+     --username <app-id> \
+     --password <password-or-cert> \
+     --tenant <tenant-id>
+   ```
+
+3. **Set the correct subscription**:
+   ```bash
    # List available subscriptions
    az account list --output table
 
    # Set the active subscription
    az account set --subscription "<subscription-name-or-id>"
-
-   # Verify the current subscription
-   az account show
    ```
 
-3. **Initialize a new project**:
+4. **Configure Azure Provider Authentication**:
+   The tool uses the Azure provider for Terraform. You can authenticate using:
+   - Interactive login (default): Uses your Azure CLI credentials
+   - Service Principal: Set these environment variables:
+     ```bash
+     export ARM_CLIENT_ID="<app-id>"
+     export ARM_CLIENT_SECRET="<password-or-cert>"
+     export ARM_SUBSCRIPTION_ID="<subscription-id>"
+     export ARM_TENANT_ID="<tenant-id>"
+     ```
+   - Managed Identity: No additional configuration needed when running on Azure
+
+5. **Initialize a new project**:
    ```bash
    # Create a new directory for your project
    mkdir my-infrastructure
@@ -51,23 +72,23 @@ Terragrunt-scaffolder (tgs) helps you create and manage infrastructure-as-code p
    ```
    This creates the `.tgs` directory with a default `tgs.yaml` file and a default `main.yaml` stack.
 
-4. **Configure your project**:
+6. **Configure your project**:
    - Edit `.tgs/tgs.yaml` to set your project name and Azure subscription details
    - Edit `.tgs/stacks/main.yaml` to define your infrastructure components
 
-5. **Generate the infrastructure**:
+7. **Generate the infrastructure**:
    ```bash
    tgs generate
    ```
    This creates the Terragrunt configuration in the `.infrastructure` directory.
 
-6. **Create the storage container**:
+8. **Create the storage container**:
    ```bash
    tgs create container
    ```
    This creates a container in your Azure storage account for storing Terraform state.
 
-7. **Initialize Terragrunt**:
+9. **Initialize Terragrunt**:
    ```bash
    # Navigate to the infrastructure directory
    cd .infrastructure
@@ -81,7 +102,7 @@ Terragrunt-scaffolder (tgs) helps you create and manage infrastructure-as-code p
    ```
    This initializes the Terraform working directory and downloads required providers.
 
-8. **Plan your changes**:
+10. **Plan your changes**:
    ```bash
    # Plan all components
    terragrunt run-all plan
@@ -430,87 +451,3 @@ Resources are named using the following convention:
 ```
 {project_name}-{region_prefix}{environment_prefix}-{app_name}
 ```
-
-For example:
-- `CUSTTP-ED-api` for an API app in eastus dev environment
-- `CUSTTP-WP-web` for a web app in westus prod environment
-
-Region and environment prefixes are single-letter codes:
-- Regions: E (eastus), W (westus), E2 (eastus2), etc.
-- Environments: D (dev), T (test), P (prod), etc.
-
-## Usage
-
-See the CLI commands section for details on how to use the tool.
-
-## CLI Commands
-
-```
-tgs init                  # Initialize a new project with tgs.yaml and main.yaml in .tgs directory
-tgs create stack [name]   # Create a new stack configuration in .tgs/stacks directory
-tgs create container      # Create a container in the storage account for remote state
-tgs list                  # List available stacks in .tgs/stacks directory
-tgs generate              # Generate Terragrunt configuration based on tgs.yaml and main.yaml
-tgs plan                  # Show changes that will be applied to the infrastructure
-tgs validate [stack]      # Validate a stack configuration (defaults to main stack)
-tgs validate-config       # Validate the tgs.yaml configuration file
-tgs details [stack]       # Show detailed information about a stack configuration
-tgs diagram              # Generate a Mermaid diagram of the infrastructure layout
-```
-
-### Workflow
-
-1. **Initialize the project**:
-   ```
-   tgs init
-   ```
-   This creates the `.tgs` directory with a default `tgs.yaml` file and a default `main.yaml` stack in the `.tgs/stacks` directory.
-
-2. **Create additional stacks** (optional):
-   ```
-   tgs create stack dev
-   ```
-   This creates a new stack configuration file at `.tgs/stacks/dev.yaml`.
-
-3. **Create storage container** (required for remote state):
-   ```
-   tgs create container
-   ```
-   This creates a container in the storage account specified in your `tgs.yaml` for storing Terraform state.
-
-4. **List available stacks**:
-   ```
-   tgs list
-   ```
-   This lists all available stacks in the `.tgs/stacks` directory.
-
-5. **Validate configurations**:
-   ```
-   tgs validate-config    # Validate tgs.yaml
-   tgs validate dev      # Validate a specific stack
-   ```
-   This ensures your configurations are valid before generating infrastructure.
-
-6. **View stack details**:
-   ```
-   tgs details dev
-   ```
-   This shows detailed information about a stack's components, architecture, and dependencies.
-
-7. **Generate infrastructure**:
-   ```
-   tgs generate
-   ```
-   This generates the Terragrunt configuration based on the configuration files.
-
-8. **Plan changes**:
-   ```
-   tgs plan
-   ```
-   This shows what changes would be applied to your infrastructure, including additions, removals, and modifications.
-
-9. **Generate diagrams**:
-   ```
-   tgs diagram
-   ```
-   This generates Mermaid diagrams showing the infrastructure layout in the `.infrastructure/diagrams` directory.

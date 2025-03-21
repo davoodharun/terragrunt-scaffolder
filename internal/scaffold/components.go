@@ -61,7 +61,9 @@ locals {
   # Resource naming convention with prefixes
   name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}"
   resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
-  resource_group_name = "rg-${local.resource_name}"
+
+  # Get resource group name from global config
+  resource_group_name = local.global_config.locals.resource_groups[local.environment_name][local.region_name]
 }
 
 terraform {
