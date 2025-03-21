@@ -9,6 +9,8 @@ import (
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/azure"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/diagram"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/pipeline"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/scaffold"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/template"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/validate"
@@ -348,6 +350,24 @@ func main() {
 		},
 	}
 
+	// Pipeline command
+	pipelineCmd := &cobra.Command{
+		Use:   "pipeline",
+		Short: "Generate Azure DevOps pipeline templates",
+		Long: `Generate Azure DevOps pipeline templates for each environment.
+This command creates:
+1. A deployment template (component-deploy.yml) that defines how to deploy each component
+2. A pipeline file for each environment that uses the deployment template and respects component dependencies`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logger.Info("Generating pipeline templates...")
+			if err := pipeline.GeneratePipelineTemplates(); err != nil {
+				return err
+			}
+			logger.Success("Pipeline templates generated successfully")
+			return nil
+		},
+	}
+
 	// Add subcommands to create command
 	createCmd.AddCommand(createStackCmd)
 	createCmd.AddCommand(createContainerCmd)
@@ -362,6 +382,7 @@ func main() {
 	rootCmd.AddCommand(validateTGSCmd)
 	rootCmd.AddCommand(detailsCmd)
 	rootCmd.AddCommand(planCmd)
+	rootCmd.AddCommand(pipelineCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

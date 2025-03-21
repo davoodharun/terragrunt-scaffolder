@@ -338,6 +338,11 @@ func Generate() error {
 	// Finish progress bar
 	logger.FinishProgress()
 
+	// Validate generated configurations
+	if err := ValidateGeneratedConfigs(); err != nil {
+		return fmt.Errorf("validation of generated configurations failed: %w", err)
+	}
+
 	logger.Success("Terragrunt scaffolding generation complete")
 	return nil
 }
@@ -1038,7 +1043,7 @@ locals {
 					configContent.WriteString(`  # Service Plan Configuration
   serviceplan = {
     sku = {
-      name     = ` + getDefaultSkuForEnvironment(envName) + `"
+      name     = "` + getDefaultSkuForEnvironment(envName) + `"
       tier     = "Standard"
       size     = "` + getDefaultSkuForEnvironment(envName) + `"
       capacity = 1
@@ -1221,6 +1226,9 @@ locals {
   # Resource naming convention with prefixes and resource type
   name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}-${local.resource_type}"
   resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
+
+  # Get resource group name from global config
+  resource_group_name = local.global_config.locals.resource_groups[local.environment_name][local.region_name]
 }
 
 terraform {
