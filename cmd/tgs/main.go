@@ -32,6 +32,22 @@ var rootCmd = &cobra.Command{
 func init() {
 	// Add version flag
 	rootCmd.SetVersionTemplate(`{{printf "%s version %s\n" .Name .Version}}`)
+
+	// Add subcommands to create command
+	createCmd.AddCommand(createStackCmd)
+	createCmd.AddCommand(createContainerCmd)
+
+	// Add commands to root command
+	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(scaffoldCmd)
+	rootCmd.AddCommand(listStacksCmd)
+	rootCmd.AddCommand(diagramCmd)
+	rootCmd.AddCommand(validateCmd)
+	rootCmd.AddCommand(validateTGSCmd)
+	rootCmd.AddCommand(detailsCmd)
+	rootCmd.AddCommand(planCmd)
+	rootCmd.AddCommand(pipelineCmd)
 }
 
 // detailsCmd shows detailed information about a stack
@@ -382,19 +398,3 @@ This command creates:
 		return nil
 	},
 }
-
-// Add subcommands to create command
-createCmd.AddCommand(createStackCmd)
-createCmd.AddCommand(createContainerCmd)
-
-// Add commands to root command
-rootCmd.AddCommand(initCmd)
-rootCmd.AddCommand(createCmd)
-rootCmd.AddCommand(scaffoldCmd)
-rootCmd.AddCommand(listStacksCmd)
-rootCmd.AddCommand(diagramCmd)
-rootCmd.AddCommand(validateCmd)
-rootCmd.AddCommand(validateTGSCmd)
-rootCmd.AddCommand(detailsCmd)
-rootCmd.AddCommand(planCmd)
-rootCmd.AddCommand(pipelineCmd)
