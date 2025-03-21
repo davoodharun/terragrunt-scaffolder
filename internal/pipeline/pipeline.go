@@ -254,36 +254,28 @@ func generateDeploymentTemplate() error {
     type: string
     default: ''
 
-stages:
-  - stage: Deploy
-    displayName: Deploy ${{ parameters.component }}
-    jobs:
-      - job: Deploy
-        displayName: Deploy to ${{ parameters.region }}
-        pool:
-          vmImage: ubuntu-latest
-        steps:
-          - task: UsePythonVersion@0
-            inputs:
-              versionSpec: '3.9'
-              addToPath: true
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.9'
+      addToPath: true
 
-          - script: |
-              python -m pip install --upgrade pip
-              pip install terragrunt
-            displayName: Install Terragrunt
+  - script: |
+      python -m pip install --upgrade pip
+      pip install terragrunt
+    displayName: Install Terragrunt
 
-          - script: |
-              cd ${{ parameters.component }}
-              terragrunt init
-              terragrunt plan -auto-approve
-              terragrunt apply -auto-approve
-            displayName: Deploy Infrastructure
-            env:
-              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-              ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
-              ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
-              ARM_TENANT_ID: $(ARM_TENANT_ID)
+  - script: |
+      cd ${{ parameters.component }}
+      terragrunt init
+      terragrunt plan -auto-approve
+      terragrunt apply -auto-approve
+    displayName: Deploy Infrastructure
+    env:
+      ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+      ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+      ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+      ARM_TENANT_ID: $(ARM_TENANT_ID)
 `
 
 	return os.WriteFile(".azuredevops/component-deploy.yml", []byte(template), 0644)
@@ -316,18 +308,23 @@ stages:
 		pipeline.WriteString(fmt.Sprintf(`  - stage: %s
     displayName: Deploy %s
     dependsOn: %s
-    template: component-deploy.yml
-    parameters:
-      component: %s
-      region: %s
-      env: %s
-      sub: %s
+    jobs:
+      - job: Deploy
+        displayName: Deploy Infrastructure
+        pool:
+          vmImage: ubuntu-latest
+        template: component-deploy.yml
+        parameters:
+          component: %s
+          region: %s
+          env: %s
+          sub: %s
 `, stage.Name, stage.Name, strings.Join(stage.DependsOn, ", "),
 			stage.Parameters["component"], stage.Parameters["region"],
 			stage.Parameters["env"], stage.Parameters["sub"]))
 
 		if app, ok := stage.Parameters["app"].(string); ok && app != "" {
-			pipeline.WriteString(fmt.Sprintf(`      app: %s
+			pipeline.WriteString(fmt.Sprintf(`          app: %s
 `, app))
 		}
 
