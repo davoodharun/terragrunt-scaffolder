@@ -108,21 +108,28 @@ include "component" {
 
 locals {
   app_name = "%s"
-}`, stackName, comp.Component, app)
+  component_vars = read_terragrunt_config("${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl")
+  env_vars = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/${local.component_vars.locals.stack_name}/${local.environment_name}.hcl")
+}`, stackName, comp.Component, app, stackName, comp.Component)
 
 				if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), terragruntContent); err != nil {
 					return fmt.Errorf("failed to create terragrunt.hcl for app: %w", err)
 				}
 			}
 		} else {
-			// Create single terragrunt.hcl for components without apps, including stack name in the path
+			// Create single terragrunt.hcl for components without apps
 			terragruntContent := fmt.Sprintf(`include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
 include "component" {
   path = "${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl"
-}`, stackName, comp.Component)
+}
+
+locals {
+  component_vars = read_terragrunt_config("${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl")
+  env_vars = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/${local.component_vars.locals.stack_name}/${local.environment_name}.hcl")
+}`, stackName, comp.Component, stackName, comp.Component)
 
 			if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), terragruntContent); err != nil {
 				return fmt.Errorf("failed to create terragrunt.hcl for component: %w", err)
@@ -182,6 +189,9 @@ locals {
 
 	logger.Info("Generated global config file: %s", globalPath)
 
+	// Track unique stacks to create their directories
+	uniqueStacks := make(map[string]bool)
+
 	// Generate a config file for each environment in each subscription
 	for _, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
@@ -193,6 +203,15 @@ locals {
 				stackName = env.Stack
 			}
 
+			// Track this stack
+			uniqueStacks[stackName] = true
+
+			// Create stack-specific config directory
+			stackConfigDir := filepath.Join(configDir, stackName)
+			if err := os.MkdirAll(stackConfigDir, 0755); err != nil {
+				return fmt.Errorf("failed to create stack config directory: %w", err)
+			}
+
 			// Read the stack configuration to get actual components
 			mainConfig, err := readMainConfig(stackName)
 			if err != nil {
@@ -201,7 +220,7 @@ locals {
 
 			// Build environment config content with only the components that exist in the stack
 			var configContent strings.Builder
-			configContent.WriteString(fmt.Sprintf("# Configuration for %s environment\n", envName))
+			configContent.WriteString(fmt.Sprintf("# Configuration for %s environment in stack %s\n", envName, stackName))
 			configContent.WriteString("# Override these values as needed for your environment\n\n")
 			configContent.WriteString("locals {\n")
 
@@ -280,8 +299,8 @@ locals {
 
 			configContent.WriteString("}")
 
-			// Create environment config file
-			configPath := filepath.Join(configDir, fmt.Sprintf("%s.hcl", envName))
+			// Create environment config file in the stack-specific directory
+			configPath := filepath.Join(stackConfigDir, fmt.Sprintf("%s.hcl", envName))
 			if err := createFile(configPath, configContent.String()); err != nil {
 				return fmt.Errorf("failed to create environment config file: %w", err)
 			}
@@ -302,7 +321,12 @@ func getDefaultValueForType(attrType interface{}, name string, env string) strin
 			// Special cases for known attributes
 			switch name {
 			case "sku_name":
+				if strings.Contains(env, "redis") || strings.Contains(env, "cache") {
+					return fmt.Sprintf(`"%s"`, getDefaultRedisSkuForEnvironment(env))
+				}
 				return fmt.Sprintf(`"%s"`, getDefaultSkuForEnvironment(env))
+			case "family":
+				return `"C"`
 			case "tier":
 				return `"Standard"`
 			case "os_type":
@@ -347,6 +371,22 @@ func getDefaultSkuForEnvironment(env string) string {
 	}
 }
 
+// Helper function to determine default Redis SKU based on environment
+func getDefaultRedisSkuForEnvironment(env string) string {
+	switch env {
+	case "prod":
+		return "Premium"
+	case "stage":
+		return "Standard"
+	case "test":
+		return "Standard"
+	case "dev":
+		return "Basic"
+	default:
+		return "Basic"
+	}
+}
+
 func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
 	logger.Info("Generating root.hcl configuration")
 
@@ -360,6 +400,7 @@ func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
 locals {
   subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
   global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
+  environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
   
   subscription_name = local.subscription_vars.locals.subscription_name
   project_name = local.global_config.locals.project_name

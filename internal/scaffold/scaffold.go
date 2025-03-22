@@ -201,7 +201,7 @@ func Generate() error {
 		}
 
 		// Generate components with all necessary files and validation
-		if err := generateComponents(mainConfig); err != nil {
+		if err := generateComponents(mainConfig, infraPath); err != nil {
 			return fmt.Errorf("failed to generate components for stack %s: %w", stackName, err)
 		}
 	}

@@ -239,6 +239,9 @@ resource "%s" "this" {
 	}
 	requiredAttributes = append(requiredAttributes, commonFields...)
 
+	// Special handling for Redis Cache
+	isRedisCache := strings.Contains(comp.Source, "redis_cache")
+
 	// Generate attribute assignments - separate required and optional
 	for name, attr := range resourceSchema.Block.Attributes {
 		if shouldSkipVariable(name, comp.Source) {
@@ -246,7 +249,12 @@ resource "%s" "this" {
 		}
 
 		if attr.Required {
-			requiredAttributes = append(requiredAttributes, fmt.Sprintf("  %s = var.%s", name, name))
+			// Special handling for Redis Cache family attribute
+			if isRedisCache && name == "family" {
+				requiredAttributes = append(requiredAttributes, fmt.Sprintf("  %s = coalesce(var.family, \"C\")", name))
+			} else {
+				requiredAttributes = append(requiredAttributes, fmt.Sprintf("  %s = var.%s", name, name))
+			}
 		} else if attr.Optional && !attr.Computed {
 			// Only include purely optional fields (not computed) as comments
 			optionalAttributes = append(optionalAttributes, fmt.Sprintf("  # %s = var.%s", name, name))
@@ -462,6 +470,9 @@ func generateSmartDefault(name string, attr SchemaAttribute) string {
 			}
 			if strings.Contains(name, "enabled") {
 				return `default = true`
+			}
+			if name == "family" {
+				return `default = "C"`
 			}
 			return `default = ""`
 		case "number":
