@@ -93,13 +93,31 @@ func findGitRepoRoot() (string, error) {
 
 // Update the function to get the infrastructure path
 func getInfrastructurePath() string {
-	// Always use .infrastructure at the repo root
-	return ".infrastructure"
+	// Get the current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		logger.Warning("Failed to get current working directory: %v", err)
+		return ".infrastructure"
+	}
+
+	// Check if .infrastructure exists in the current directory
+	infraPath := filepath.Join(cwd, ".infrastructure")
+	if _, err := os.Stat(infraPath); err == nil {
+		return infraPath
+	}
+
+	// If not found, create it
+	if err := os.MkdirAll(infraPath, 0755); err != nil {
+		logger.Warning("Failed to create .infrastructure directory: %v", err)
+		return ".infrastructure"
+	}
+
+	return infraPath
 }
 
 func Generate() error {
 	// Get the infrastructure path
-	infraPath := ".infrastructure"
+	infraPath := getInfrastructurePath()
 
 	// Read TGS config
 	tgsConfig, err := ReadTGSConfig()
@@ -124,12 +142,6 @@ func Generate() error {
 		return fmt.Errorf("failed to create infrastructure directory: %w", err)
 	}
 
-	// Create base directory structure
-	baseDir := filepath.Base(infraPath)
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return fmt.Errorf("failed to create base directory: %w", err)
-	}
-
 	logger.Success("Infrastructure folder created")
 
 	// Generate root.hcl
@@ -142,8 +154,8 @@ func Generate() error {
 		return fmt.Errorf("failed to generate environment config files: %w", err)
 	}
 
-	// First pass: collect all unique components and their configurations
-	uniqueComponents := make(map[string]config.Component)
+	// First pass: collect all unique components and their configurations by stack
+	stackComponents := make(map[string]map[string]config.Component)
 	for _, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
 			stackName := "main"
@@ -156,34 +168,42 @@ func Generate() error {
 				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}
 
+			// Initialize map for this stack if it doesn't exist
+			if _, exists := stackComponents[stackName]; !exists {
+				stackComponents[stackName] = make(map[string]config.Component)
+			}
+
 			// Add components from this stack
 			for compName, comp := range mainConfig.Stack.Components {
-				uniqueComponents[compName] = comp
+				stackComponents[stackName][compName] = comp
 			}
 		}
 	}
 
 	// Create components directory
-	componentsDir := filepath.Join(baseDir, "_components")
+	componentsDir := filepath.Join(infraPath, "_components")
 	if err := os.MkdirAll(componentsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create components directory: %w", err)
 	}
 
 	logger.Success("Components created")
 
-	// Start progress bar for component generation
-	logger.StartProgress("Generating components", len(uniqueComponents))
+	// Generate components for each stack
+	for stackName, components := range stackComponents {
+		// Start progress bar for component generation
+		logger.StartProgress("Generating components for stack "+stackName, len(components))
 
-	// Generate each unique component once
-	mainConfig := &config.MainConfig{
-		Stack: config.StackConfig{
-			Components: uniqueComponents,
-		},
-	}
+		mainConfig := &config.MainConfig{
+			Stack: config.StackConfig{
+				Name:       stackName,
+				Components: components,
+			},
+		}
 
-	// Generate components with all necessary files and validation
-	if err := generateComponents(mainConfig); err != nil {
-		return fmt.Errorf("failed to generate components: %w", err)
+		// Generate components with all necessary files and validation
+		if err := generateComponents(mainConfig); err != nil {
+			return fmt.Errorf("failed to generate components for stack %s: %w", stackName, err)
+		}
 	}
 
 	// Process each subscription for environment structure
@@ -314,19 +334,14 @@ func ReadTGSConfig() (*config.TGSConfig, error) {
 	configPath := filepath.Join(configDir, "tgs.yaml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		// Try the executable's directory
-		execPath, err := os.Executable()
+		// Try the current directory
+		cwd, err := os.Getwd()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get executable path: %w", err)
+			return nil, fmt.Errorf("failed to get current working directory: %w", err)
 		}
-		execDir := filepath.Dir(execPath)
-		data, err = os.ReadFile(filepath.Join(execDir, "tgs.yaml"))
+		data, err = os.ReadFile(filepath.Join(cwd, "tgs.yaml"))
 		if err != nil {
-			// Try current directory as fallback
-			data, err = os.ReadFile("tgs.yaml")
-			if err != nil {
-				return nil, err
-			}
+			return nil, fmt.Errorf("failed to read TGS config: %w", err)
 		}
 	}
 
@@ -335,43 +350,21 @@ func ReadTGSConfig() (*config.TGSConfig, error) {
 		return nil, err
 	}
 
-	// Set a default project name if it's empty
-	if cfg.Name == "" {
-		logger.Warning("Project name not set in tgs.yaml, using default: CUSTTP")
-		cfg.Name = "CUSTTP"
-	}
-
 	return &cfg, nil
 }
 
-// Update readMainConfig to accept a stack name parameter
+// readMainConfig reads the stack configuration from the .tgs/stacks directory
 func readMainConfig(stackName string) (*config.MainConfig, error) {
-	// Get the stacks directory
 	stacksDir := getStacksDir()
-
-	// Try to read from the .tgs/stacks directory first
 	stackPath := filepath.Join(stacksDir, fmt.Sprintf("%s.yaml", stackName))
 	data, err := os.ReadFile(stackPath)
 	if err != nil {
-		// Try the executable's directory
-		execPath, err := os.Executable()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get executable path: %w", err)
-		}
-		execDir := filepath.Dir(execPath)
-		data, err = os.ReadFile(filepath.Join(execDir, fmt.Sprintf("%s.yaml", stackName)))
-		if err != nil {
-			// Try current directory as fallback
-			data, err = os.ReadFile(fmt.Sprintf("%s.yaml", stackName))
-			if err != nil {
-				return nil, err
-			}
-		}
+		return nil, fmt.Errorf("failed to read stack config file: %w", err)
 	}
 
 	var cfg config.MainConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal stack config: %w", err)
 	}
 
 	return &cfg, nil
@@ -389,12 +382,40 @@ func createFile(path string, content string) error {
 
 // getConfigDir returns the path to the .tgs config directory
 func getConfigDir() string {
-	return ".tgs"
+	// Get the current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		logger.Warning("Failed to get current working directory: %v", err)
+		return ".tgs"
+	}
+
+	// Check if .tgs exists in the current directory
+	configPath := filepath.Join(cwd, ".tgs")
+	if _, err := os.Stat(configPath); err == nil {
+		return configPath
+	}
+
+	// If not found, create it
+	if err := os.MkdirAll(configPath, 0755); err != nil {
+		logger.Warning("Failed to create .tgs directory: %v", err)
+		return ".tgs"
+	}
+
+	return configPath
 }
 
 // getStacksDir returns the path to the .tgs/stacks directory
 func getStacksDir() string {
-	return filepath.Join(getConfigDir(), "stacks")
+	configDir := getConfigDir()
+	stacksDir := filepath.Join(configDir, "stacks")
+
+	// Create stacks directory if it doesn't exist
+	if err := os.MkdirAll(stacksDir, 0755); err != nil {
+		logger.Warning("Failed to create stacks directory: %v", err)
+		return filepath.Join(".tgs", "stacks")
+	}
+
+	return stacksDir
 }
 
 // ReadMainConfig reads the stack configuration from the .tgs/stacks directory

@@ -11,6 +11,25 @@ import (
 )
 
 func generateEnvironment(subscription, region string, envName string, components []config.RegionComponent, infraPath string) error {
+	// Get the stack name from the environment
+	stackName := "main"
+	tgsConfig, err := ReadTGSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to read TGS config: %w", err)
+	}
+
+	// Find the stack name for this environment
+	if sub, ok := tgsConfig.Subscriptions[subscription]; ok {
+		for _, env := range sub.Environments {
+			if env.Name == envName {
+				if env.Stack != "" {
+					stackName = env.Stack
+				}
+				break
+			}
+		}
+	}
+
 	// Create environment base path
 	basePath := filepath.Join(infraPath, subscription, region, envName)
 	if err := os.MkdirAll(basePath, 0755); err != nil {
@@ -48,13 +67,7 @@ func generateEnvironment(subscription, region string, envName string, components
 		return fmt.Errorf("failed to create subscription directory: %w", err)
 	}
 
-	// Get the subscription configuration to access remote state details
-	subConfig, err := ReadTGSConfig()
-	if err != nil {
-		return fmt.Errorf("failed to read TGS config: %w", err)
-	}
-
-	sub, exists := subConfig.Subscriptions[subscription]
+	sub, exists := tgsConfig.Subscriptions[subscription]
 	if !exists {
 		return fmt.Errorf("subscription %s not found in TGS config", subscription)
 	}
@@ -84,32 +97,32 @@ func generateEnvironment(subscription, region string, envName string, components
 					return fmt.Errorf("failed to create app directory: %w", err)
 				}
 
-				// Create app-specific terragrunt.hcl
+				// Create app-specific terragrunt.hcl with stack name in the path
 				terragruntContent := fmt.Sprintf(`include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
 include "component" {
-  path = "${get_repo_root()}/.infrastructure/_components/%s/component.hcl"
+  path = "${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl"
 }
 
 locals {
   app_name = "%s"
-}`, comp.Component, app)
+}`, stackName, comp.Component, app)
 
 				if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), terragruntContent); err != nil {
 					return fmt.Errorf("failed to create terragrunt.hcl for app: %w", err)
 				}
 			}
 		} else {
-			// Create single terragrunt.hcl for components without apps
+			// Create single terragrunt.hcl for components without apps, including stack name in the path
 			terragruntContent := fmt.Sprintf(`include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
 include "component" {
-  path = "${get_repo_root()}/.infrastructure/_components/%s/component.hcl"
-}`, comp.Component)
+  path = "${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl"
+}`, stackName, comp.Component)
 
 			if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), terragruntContent); err != nil {
 				return fmt.Errorf("failed to create terragrunt.hcl for component: %w", err)
@@ -123,14 +136,8 @@ include "component" {
 func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) error {
 	logger.Info("Generating environment configuration files")
 
-	// Ensure the .infrastructure directory exists first
-	baseDir := filepath.Base(infraPath)
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return fmt.Errorf("failed to create infrastructure directory: %w", err)
-	}
-
 	// Create config directory
-	configDir := filepath.Join(baseDir, "config")
+	configDir := filepath.Join(infraPath, "config")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
@@ -199,83 +206,76 @@ locals {
 			configContent.WriteString("locals {\n")
 
 			// Add configurations only for components that exist in the stack
-			for compName := range mainConfig.Stack.Components {
-				switch compName {
-				case "serviceplan":
-					configContent.WriteString(`  # Service Plan Configuration
-  serviceplan = {
-    sku = {
-      name     = "` + getDefaultSkuForEnvironment(envName) + `"
-      tier     = "Standard"
-      size     = "` + getDefaultSkuForEnvironment(envName) + `"
-      capacity = 1
-    }
-    os_type      = "Linux"
-    worker_count = 1
-  }
-
-`)
-				case "appservice":
-					configContent.WriteString(`  # App Service Configuration
-  appservice = {
-    https_only = true
-    site_config = {
-      always_on = true
-      application_stack = {
-        dotnet_version = "6.0"
-      }
-      use_32_bit_worker = false
-      websockets_enabled = false
-    }
-    app_settings = {
-      WEBSITES_ENABLE_APP_SERVICE_STORAGE = false
-      WEBSITE_RUN_FROM_PACKAGE = 1
-    }
-  }
-
-`)
-				case "functionapp":
-					configContent.WriteString(`  # Function App Configuration
-  functionapp = {
-    https_only = true
-    site_config = {
-      always_on = true
-      application_stack = {
-        node_version = "16"
-      }
-    }
-    app_settings = {
-      FUNCTIONS_WORKER_RUNTIME = "node"
-      WEBSITE_NODE_DEFAULT_VERSION = "~16"
-    }
-  }
-
-`)
-				case "rediscache":
-					configContent.WriteString(`  # Redis Cache Configuration
-  rediscache = {
-    sku = {
-      name     = "Basic"
-      family   = "C"
-      capacity = 1
-    }
-    enable_non_ssl_port = false
-    minimum_tls_version = "1.2"
-  }
-
-`)
-				case "keyvault":
-					configContent.WriteString(`  # Key Vault Configuration
-  keyvault = {
-    sku_name = "standard"
-    enabled_for_disk_encryption = true
-    enabled_for_deployment = true
-    enabled_for_template_deployment = true
-    purge_protection_enabled = true
-  }
-
-`)
+			for compName, comp := range mainConfig.Stack.Components {
+				if comp.Provider == "" {
+					continue
 				}
+
+				// Fetch provider schema for this component
+				schema, err := fetchProviderSchema(comp.Provider, comp.Version, comp.Source)
+				if err != nil || schema == nil {
+					logger.Warning("Failed to fetch provider schema for %s: %v", compName, err)
+					continue
+				}
+
+				// Try different provider keys
+				providerKeys := []string{
+					"registry.terraform.io/hashicorp/azurerm",
+					"hashicorp/azurerm",
+				}
+
+				var resourceSchema struct {
+					Block struct {
+						Attributes map[string]SchemaAttribute `json:"attributes"`
+						BlockTypes map[string]struct {
+							Block struct {
+								Attributes map[string]SchemaAttribute `json:"attributes"`
+							} `json:"block"`
+							NestingMode string `json:"nesting_mode"`
+						} `json:"block_types"`
+					} `json:"block"`
+				}
+
+				found := false
+				for _, key := range providerKeys {
+					if provider, ok := schema.ProviderSchema[key]; ok {
+						if rs, ok := provider.ResourceSchemas[comp.Source]; ok {
+							resourceSchema = rs
+							found = true
+							break
+						}
+					}
+				}
+
+				if !found {
+					continue
+				}
+
+				// Start component configuration block
+				configContent.WriteString(fmt.Sprintf("  # %s Configuration\n", compName))
+				configContent.WriteString(fmt.Sprintf("  %s = {\n", compName))
+
+				// Add required attributes with default values
+				for name, attr := range resourceSchema.Block.Attributes {
+					if attr.Required && !shouldSkipVariable(name, comp.Source) {
+						defaultValue := getDefaultValueForType(attr.Type, name, envName)
+						configContent.WriteString(fmt.Sprintf("    %s = %s\n", name, defaultValue))
+					}
+				}
+
+				// Add block types (nested configurations)
+				for blockName, blockType := range resourceSchema.Block.BlockTypes {
+					configContent.WriteString(fmt.Sprintf("    %s = {\n", blockName))
+					for attrName, attr := range blockType.Block.Attributes {
+						if attr.Required {
+							defaultValue := getDefaultValueForType(attr.Type, attrName, envName)
+							configContent.WriteString(fmt.Sprintf("      %s = %s\n", attrName, defaultValue))
+						}
+					}
+					configContent.WriteString("    }\n")
+				}
+
+				configContent.WriteString("  }\n\n")
 			}
 
 			configContent.WriteString("}")
@@ -291,6 +291,44 @@ locals {
 	}
 
 	return nil
+}
+
+// Helper function to get default value based on type and environment
+func getDefaultValueForType(attrType interface{}, name string, env string) string {
+	switch t := attrType.(type) {
+	case string:
+		switch t {
+		case "string":
+			// Special cases for known attributes
+			switch name {
+			case "sku_name":
+				return fmt.Sprintf(`"%s"`, getDefaultSkuForEnvironment(env))
+			case "tier":
+				return `"Standard"`
+			case "os_type":
+				return `"Linux"`
+			default:
+				return `""`
+			}
+		case "number":
+			return "0"
+		case "bool":
+			return "false"
+		case "list":
+			return "[]"
+		case "map":
+			return "{}"
+		default:
+			return "null"
+		}
+	case map[string]interface{}:
+		if t["type"] == "string" {
+			return `""`
+		}
+		return "null"
+	default:
+		return "null"
+	}
 }
 
 // Helper function to determine default SKU based on environment

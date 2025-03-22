@@ -17,10 +17,15 @@ func generateComponents(mainConfig *config.MainConfig) error {
 	infraPath := getInfrastructurePath()
 
 	// Create components directory
-	baseDir := filepath.Base(infraPath)
-	componentsDir := filepath.Join(baseDir, "_components")
+	componentsDir := filepath.Join(infraPath, "_components")
 	if err := os.MkdirAll(componentsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create components directory: %w", err)
+	}
+
+	// Create stack-specific components directory
+	stackComponentsDir := filepath.Join(componentsDir, mainConfig.Stack.Name)
+	if err := os.MkdirAll(stackComponentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create stack components directory: %w", err)
 	}
 
 	// Track validated components to avoid duplicate messages
@@ -35,8 +40,8 @@ func generateComponents(mainConfig *config.MainConfig) error {
 
 		logger.Info("Generating component: %s", compName)
 
-		// Create component directory
-		componentPath := filepath.Join(componentsDir, compName)
+		// Create component directory under the stack-specific directory
+		componentPath := filepath.Join(stackComponentsDir, compName)
 		if err := os.MkdirAll(componentPath, 0755); err != nil {
 			return err
 		}
@@ -44,6 +49,45 @@ func generateComponents(mainConfig *config.MainConfig) error {
 		// Generate Terraform files from provider schema if available
 		if err := generateTerraformFiles(componentPath, comp); err != nil {
 			return err
+		}
+
+		// Fetch provider schema for this component
+		var requiredInputs string
+		if comp.Provider != "" {
+			schema, err := fetchProviderSchema(comp.Provider, comp.Version, comp.Source)
+			if err == nil && schema != nil {
+				// Try different provider keys
+				providerKeys := []string{
+					"registry.terraform.io/hashicorp/azurerm",
+					"hashicorp/azurerm",
+				}
+
+				for _, key := range providerKeys {
+					if provider, ok := schema.ProviderSchema[key]; ok {
+						if resourceSchema, ok := provider.ResourceSchemas[comp.Source]; ok {
+							var requiredFields []string
+							for name, attr := range resourceSchema.Block.Attributes {
+								if attr.Required && !shouldSkipVariable(name, comp.Source) {
+									if name == "service_plan_id" && strings.Contains(comp.Source, "web_app") {
+										requiredFields = append(requiredFields, fmt.Sprintf("%s = dependency.serviceplan.outputs.id", name))
+									} else {
+										requiredFields = append(requiredFields, fmt.Sprintf("%s = try(local.env_config.locals.%s.%s, null)", name, compName, name))
+									}
+								}
+							}
+							if len(requiredFields) > 0 {
+								requiredInputs = "# Required settings from provider schema\n" + strings.Join(requiredFields, "\n")
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// If no schema-based inputs, fall back to basic inputs from generateEnvConfigInputs
+		if requiredInputs == "" {
+			requiredInputs = generateEnvConfigInputs(compName)
 		}
 
 		// Create component.hcl with dependency blocks
@@ -80,7 +124,7 @@ locals {
 }
 
 terraform {
-  source = "${get_repo_root()}/.infrastructure/_components/%s"
+  source = "${get_repo_root()}/.infrastructure/_components/%s/%s"
 }
 
 %s
@@ -105,7 +149,7 @@ inputs = {
   # Include environment-specific configurations based on component type
 %s
 }`,
-			getResourceTypeAbbreviation(compName), compName, generateDependencyBlocks(comp.Deps, infraPath), generateEnvConfigInputs(compName))
+			getResourceTypeAbbreviation(compName), mainConfig.Stack.Name, compName, generateDependencyBlocks(comp.Deps, infraPath), requiredInputs)
 
 		if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
 			return err
@@ -117,7 +161,7 @@ inputs = {
 		}
 
 		// Validate component variables against environment config
-		envConfigPath := filepath.Join(baseDir, "config", "dev.hcl") // Use dev.hcl as base for validation
+		envConfigPath := filepath.Join(infraPath, "config", "dev.hcl") // Use dev.hcl as base for validation
 		if err := ValidateComponentVariables(componentPath, envConfigPath); err != nil {
 			return fmt.Errorf("component variables validation failed for %s: %w", compName, err)
 		}
@@ -135,7 +179,8 @@ inputs = {
 func getResourceTypeAbbreviation(resourceType string) string {
 	resourceAbbreviations := map[string]string{
 		"serviceplan":    "svcpln",
-		"appservice":     "appsvc",
+		"appservice":     "app",
+		"appservice_api": "app",
 		"functionapp":    "fncapp",
 		"rediscache":     "cache",
 		"keyvault":       "kv",
@@ -164,154 +209,9 @@ func getResourceTypeAbbreviation(resourceType string) string {
 // Helper function to generate environment-specific inputs based on component type
 func generateEnvConfigInputs(compName string) string {
 	switch compName {
-	case "appservice":
-		return `# App Service specific settings
-service_plan_id = dependency.serviceplan.outputs.id
-
-# Import all app service settings from environment config
-https_only = try(local.env_config.locals.appservice.https_only, true)
-site_config = try(local.env_config.locals.appservice.site_config, {})
-app_settings = try(local.env_config.locals.appservice.app_settings, {})
-auth_settings = try(local.env_config.locals.appservice.auth_settings, {})
-identity = try(local.env_config.locals.appservice.identity, {})
-backup = try(local.env_config.locals.appservice.backup, {})
-connection_string = try(local.env_config.locals.appservice.connection_string, [])
-cors = try(local.env_config.locals.appservice.cors, {})
-ip_restriction = try(local.env_config.locals.appservice.ip_restriction, [])
-scm_ip_restriction = try(local.env_config.locals.appservice.scm_ip_restriction, [])
-virtual_network_subnet_id = try(local.env_config.locals.appservice.virtual_network_subnet_id, null)
-key_vault_reference_identity_id = try(local.env_config.locals.appservice.key_vault_reference_identity_id, null)
-client_cert_enabled = try(local.env_config.locals.appservice.client_cert_enabled, false)
-client_cert_mode = try(local.env_config.locals.appservice.client_cert_mode, "Required")`
-
 	case "serviceplan":
 		return `# Service Plan specific settings
 sku_name = try(local.env_config.locals.serviceplan.sku_name, "B1")`
-
-	case "functionapp":
-		return `# Function App specific settings
-service_plan_id = dependency.serviceplan.outputs.id
-
-# Import all function app settings from environment config
-app_settings = try(local.env_config.locals.functionapp.app_settings, {})
-site_config = try(local.env_config.locals.functionapp.site_config, {})
-auth_settings = try(local.env_config.locals.functionapp.auth_settings, {})
-identity = try(local.env_config.locals.functionapp.identity, {})
-backup = try(local.env_config.locals.functionapp.backup, {})
-connection_string = try(local.env_config.locals.functionapp.connection_string, [])
-cors = try(local.env_config.locals.functionapp.cors, {})
-ip_restriction = try(local.env_config.locals.functionapp.ip_restriction, [])
-scm_ip_restriction = try(local.env_config.locals.functionapp.scm_ip_restriction, [])
-virtual_network_subnet_id = try(local.env_config.locals.functionapp.virtual_network_subnet_id, null)
-key_vault_reference_identity_id = try(local.env_config.locals.functionapp.key_vault_reference_identity_id, null)
-client_cert_enabled = try(local.env_config.locals.functionapp.client_cert_enabled, false)
-client_cert_mode = try(local.env_config.locals.functionapp.client_cert_mode, "Required")`
-
-	case "rediscache":
-		return `# Redis Cache specific settings
-sku_name = try(local.env_config.locals.rediscache.sku_name, "Basic")
-capacity = try(local.env_config.locals.rediscache.capacity, 0)
-family = try(local.env_config.locals.rediscache.family, "C")
-enable_non_ssl_port = try(local.env_config.locals.rediscache.enable_non_ssl_port, false)
-minimum_tls_version = try(local.env_config.locals.rediscache.minimum_tls_version, "1.2")
-redis_version = try(local.env_config.locals.rediscache.redis_version, "6")`
-
-	case "keyvault":
-		return `# Key Vault specific settings
-sku_name = try(local.env_config.locals.keyvault.sku_name, "standard")
-enabled_for_disk_encryption = try(local.env_config.locals.keyvault.enabled_for_disk_encryption, true)
-enabled_for_deployment = try(local.env_config.locals.keyvault.enabled_for_deployment, true)
-enabled_for_template_deployment = try(local.env_config.locals.keyvault.enabled_for_template_deployment, true)
-purge_protection_enabled = try(local.env_config.locals.keyvault.purge_protection_enabled, false)
-soft_delete_retention_days = try(local.env_config.locals.keyvault.soft_delete_retention_days, 7)
-network_acls = try(local.env_config.locals.keyvault.network_acls, {})
-public_network_access_enabled = try(local.env_config.locals.keyvault.public_network_access_enabled, true)`
-
-	case "servicebus":
-		return `# Service Bus specific settings
-sku = try(local.env_config.locals.servicebus.sku, "Standard")
-capacity = try(local.env_config.locals.servicebus.capacity, 0)
-zone_redundant = try(local.env_config.locals.servicebus.zone_redundant, false)`
-
-	case "cosmos_account":
-		return `# Cosmos DB Account specific settings
-offer_type = try(local.env_config.locals.cosmos_account.offer_type, "Standard")
-kind = try(local.env_config.locals.cosmos_account.kind, "GlobalDocumentDB")
-consistency_level = try(local.env_config.locals.cosmos_account.consistency_level, "Session")
-enable_automatic_failover = try(local.env_config.locals.cosmos_account.enable_automatic_failover, false)
-enable_multiple_write_locations = try(local.env_config.locals.cosmos_account.enable_multiple_write_locations, false)
-is_virtual_network_filter_enabled = try(local.env_config.locals.cosmos_account.is_virtual_network_filter_enabled, false)
-virtual_network_rules = try(local.env_config.locals.cosmos_account.virtual_network_rules, [])`
-
-	case "cosmos_db":
-		return `# Cosmos DB specific settings
-resource_group_name = dependency.cosmos_account.outputs.resource_group_name
-account_name = dependency.cosmos_account.outputs.name
-throughput = try(local.env_config.locals.cosmos_db.throughput, 400)`
-
-	case "apim":
-		return `# API Management specific settings
-sku_name = try(local.env_config.locals.apim.sku_name, "Developer_1")
-identity = try(local.env_config.locals.apim.identity, {})
-protocols = try(local.env_config.locals.apim.protocols, ["http", "https"])
-certificate = try(local.env_config.locals.apim.certificate, [])
-security = try(local.env_config.locals.apim.security, {})
-hostname_configuration = try(local.env_config.locals.apim.hostname_configuration, [])
-virtual_network_type = try(local.env_config.locals.apim.virtual_network_type, "None")
-virtual_network_configuration = try(local.env_config.locals.apim.virtual_network_configuration, [])`
-
-	case "storage":
-		return `# Storage Account specific settings
-account_tier = try(local.env_config.locals.storage.account_tier, "Standard")
-account_replication_type = try(local.env_config.locals.storage.account_replication_type, "LRS")
-enable_https_traffic_only = try(local.env_config.locals.storage.enable_https_traffic_only, true)
-min_tls_version = try(local.env_config.locals.storage.min_tls_version, "TLS1_2")
-allow_nested_items_to_be_public = try(local.env_config.locals.storage.allow_nested_items_to_be_public, false)
-shared_access_key_enabled = try(local.env_config.locals.storage.shared_access_key_enabled, true)
-network_rules = try(local.env_config.locals.storage.network_rules, {})
-blob_properties = try(local.env_config.locals.storage.blob_properties, {})
-queue_properties = try(local.env_config.locals.storage.queue_properties, {})
-static_website = try(local.env_config.locals.storage.static_website, {})`
-
-	case "sql_server":
-		return `# SQL Server specific settings
-version = try(local.env_config.locals.sql_server.version, "12.0")
-administrator_login = try(local.env_config.locals.sql_server.administrator_login, "sqladmin")
-administrator_login_password = try(local.env_config.locals.sql_server.administrator_login_password, null)
-minimum_tls_version = try(local.env_config.locals.sql_server.minimum_tls_version, "1.2")
-public_network_access_enabled = try(local.env_config.locals.sql_server.public_network_access_enabled, true)
-identity = try(local.env_config.locals.sql_server.identity, {})
-extended_auditing_policy = try(local.env_config.locals.sql_server.extended_auditing_policy, [])
-threat_detection_policy = try(local.env_config.locals.sql_server.threat_detection_policy, [])
-azuread_administrator = try(local.env_config.locals.sql_server.azuread_administrator, [])`
-
-	case "sql_database":
-		return `# SQL Database specific settings
-server_id = dependency.sql_server.outputs.id
-sku_name = try(local.env_config.locals.sql_database.sku_name, "Basic")
-max_size_gb = try(local.env_config.locals.sql_database.max_size_gb, 5)
-zone_redundant = try(local.env_config.locals.sql_database.zone_redundant, false)
-read_replicas = try(local.env_config.locals.sql_database.read_replicas, 0)
-read_scale = try(local.env_config.locals.sql_database.read_scale, false)
-collation = try(local.env_config.locals.sql_database.collation, "SQL_Latin1_General_CP1_CI_AS")`
-
-	case "eventhub":
-		return `# Event Hub specific settings
-namespace_name = dependency.eventhub_namespace.outputs.name
-resource_group_name = dependency.eventhub_namespace.outputs.resource_group_name
-partition_count = try(local.env_config.locals.eventhub.partition_count, 2)
-message_retention = try(local.env_config.locals.eventhub.message_retention, 1)
-capture_description = try(local.env_config.locals.eventhub.capture_description, [])`
-
-	case "loganalytics":
-		return `# Log Analytics Workspace specific settings
-sku = try(local.env_config.locals.loganalytics.sku, "PerGB2018")
-retention_in_days = try(local.env_config.locals.loganalytics.retention_in_days, 30)
-daily_quota_gb = try(local.env_config.locals.loganalytics.daily_quota_gb, -1)
-internet_ingestion_enabled = try(local.env_config.locals.loganalytics.internet_ingestion_enabled, true)
-internet_query_enabled = try(local.env_config.locals.loganalytics.internet_query_enabled, true)
-reservation_capacity_in_gb_per_day = try(local.env_config.locals.loganalytics.reservation_capacity_in_gb_per_day, -1)`
-
 	default:
 		return ""
 	}

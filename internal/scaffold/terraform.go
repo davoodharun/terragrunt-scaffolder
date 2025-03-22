@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,39 +15,100 @@ import (
 
 func generateTerraformFiles(compPath string, comp config.Component) error {
 	if comp.Provider == "" {
-		logger.Warning("No provider specified for component, skipping terraform file generation")
-		return nil
+		return fmt.Errorf("no provider specified for component")
 	}
+
+	logger.Info("Generating Terraform files in: %s", compPath)
 
 	// Fetch provider schema from Terraform Registry
 	schema, err := fetchProviderSchema(comp.Provider, comp.Version, comp.Source)
 	if err != nil {
 		logger.Warning("Failed to fetch provider schema: %v, generating basic terraform files", err)
-		// Generate basic files without schema
-		return generateBasicTerraformFiles(compPath, comp)
+		schema = nil
 	}
 
-	if schema == nil {
-		logger.Warning("Provider schema is nil, generating basic terraform files")
-		return generateBasicTerraformFiles(compPath, comp)
+	// Generate main.tf
+	var mainContent string
+	if schema != nil {
+		mainContent = generateMainTF(comp, schema)
+	} else {
+		mainContent = fmt.Sprintf(`
+resource "%s" "this" {
+  name                = var.name
+  resource_group_name = var.resource_group_name
+  location            = var.location
+
+  tags = var.tags
+}
+
+output "id" {
+  value = resource.%s.this.id
+  description = "The ID of the %s"
+}
+
+output "name" {
+  value = resource.%s.this.name
+  description = "The name of the %s"
+}`, comp.Source, comp.Source, comp.Source, comp.Source, comp.Source)
 	}
 
-	// Generate main.tf using the schema
-	mainContent := generateMainTF(comp, schema)
-	if err := createFile(filepath.Join(compPath, "main.tf"), mainContent); err != nil {
-		return err
+	mainPath := filepath.Join(compPath, "main.tf")
+	logger.Info("Creating main.tf at: %s", mainPath)
+	if err := createFile(mainPath, mainContent); err != nil {
+		return fmt.Errorf("failed to create main.tf: %w", err)
 	}
 
-	// Generate variables.tf using the schema
-	varsContent := generateVariablesTF(schema, comp)
-	if err := createFile(filepath.Join(compPath, "variables.tf"), varsContent); err != nil {
-		return err
+	// Generate variables.tf
+	var varsContent string
+	if schema != nil {
+		varsContent = generateVariablesTF(schema, comp)
+	} else {
+		varsContent = `
+variable "name" {
+  type        = string
+  description = "The name of the resource"
+}
+
+variable "resource_group_name" {
+  type        = string
+  description = "The name of the resource group"
+}
+
+variable "location" {
+  type        = string
+  description = "The location/region of the resource"
+}
+
+variable "tags" {
+  type        = map(string)
+  description = "Tags to apply to the resource"
+  default     = {}
+}`
+	}
+
+	varsPath := filepath.Join(compPath, "variables.tf")
+	logger.Info("Creating variables.tf at: %s", varsPath)
+	if err := createFile(varsPath, varsContent); err != nil {
+		return fmt.Errorf("failed to create variables.tf: %w", err)
 	}
 
 	// Generate provider.tf
 	providerContent := generateProviderTF(comp)
-	if err := createFile(filepath.Join(compPath, "provider.tf"), providerContent); err != nil {
-		return err
+	providerPath := filepath.Join(compPath, "provider.tf")
+	logger.Info("Creating provider.tf at: %s", providerPath)
+	if err := createFile(providerPath, providerContent); err != nil {
+		return fmt.Errorf("failed to create provider.tf: %w", err)
+	}
+
+	// Verify all required files exist
+	requiredFiles := []string{"main.tf", "variables.tf", "provider.tf"}
+	for _, file := range requiredFiles {
+		filePath := filepath.Join(compPath, file)
+		if _, err := os.Stat(filePath); err != nil {
+			return fmt.Errorf("failed to verify required file %s: %w", file, err)
+		} else {
+			logger.Info("Verified file exists: %s", filePath)
+		}
 	}
 
 	return nil

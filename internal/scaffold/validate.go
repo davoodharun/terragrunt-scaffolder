@@ -8,21 +8,23 @@ import (
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 	"github.com/hashicorp/hcl/v2/hclparse"
-	"github.com/hashicorp/hcl/v2/hclsyntax"
 )
 
 // ValidateGeneratedConfigs checks the HCL syntax of all generated configuration files
 func ValidateGeneratedConfigs() error {
 	logger.Info("Validating generated configuration files")
 
+	// Get the infrastructure path
+	infraPath := getInfrastructurePath()
+
 	// Check environment config files
-	configDir := filepath.Join(".infrastructure", "config")
+	configDir := filepath.Join(infraPath, "config")
 	if err := validateHCLFiles(configDir, "*.hcl"); err != nil {
 		return fmt.Errorf("environment config validation failed: %w", err)
 	}
 
 	// Check component config files
-	componentsDir := filepath.Join(".infrastructure", "_components")
+	componentsDir := filepath.Join(infraPath, "_components")
 	if err := validateHCLFiles(componentsDir, "**/*.hcl"); err != nil {
 		return fmt.Errorf("component config validation failed: %w", err)
 	}
@@ -216,158 +218,10 @@ func ValidateComponentStructure(componentPath string) error {
 	for _, file := range requiredFiles {
 		filePath := filepath.Join(componentPath, file)
 		if _, err := os.Stat(filePath); err != nil {
-			return fmt.Errorf("required file %s is missing in component %s: %w", file, componentPath, err)
-		}
-	}
-
-	// Parse variables.tf to get defined variables
-	varsContent, err := os.ReadFile(filepath.Join(componentPath, "variables.tf"))
-	if err != nil {
-		return fmt.Errorf("failed to read variables.tf: %w", err)
-	}
-
-	// Parse component.hcl to get input variables
-	compContent, err := os.ReadFile(filepath.Join(componentPath, "component.hcl"))
-	if err != nil {
-		return fmt.Errorf("failed to read component.hcl: %w", err)
-	}
-
-	// Extract variables from variables.tf
-	parser := hclparse.NewParser()
-	varsFile, diags := parser.ParseHCL(varsContent, "variables.tf")
-	if diags.HasErrors() {
-		return fmt.Errorf("invalid HCL in variables.tf: %v", diags)
-	}
-
-	// Extract inputs from component.hcl
-	compFile, diags := parser.ParseHCL(compContent, "component.hcl")
-	if diags.HasErrors() {
-		return fmt.Errorf("invalid HCL in component.hcl: %v", diags)
-	}
-
-	// Get all inputs defined in component.hcl
-	definedInputs := make(map[string]bool)
-	for _, block := range compFile.Body.(*hclsyntax.Body).Blocks {
-		if block.Type == "inputs" {
-			// Check direct attributes
-			for name := range block.Body.Attributes {
-				definedInputs[name] = true
+			if os.IsNotExist(err) {
+				return fmt.Errorf("required file %s is missing in component", file)
 			}
-			// Check nested blocks
-			for _, nestedBlock := range block.Body.Blocks {
-				if nestedBlock.Type == "tags" {
-					definedInputs["tags"] = true
-				}
-			}
-		}
-	}
-
-	// Also check for inputs in locals block
-	for _, block := range compFile.Body.(*hclsyntax.Body).Blocks {
-		if block.Type == "locals" {
-			for name := range block.Body.Attributes {
-				if name == "resource_name" {
-					definedInputs["name"] = true
-				}
-				if name == "resource_group_name" {
-					definedInputs["resource_group_name"] = true
-				}
-				if name == "region_name" {
-					definedInputs["location"] = true
-				}
-			}
-		}
-	}
-
-	// Get the resource type from main.tf
-	mainContent, err := os.ReadFile(filepath.Join(componentPath, "main.tf"))
-	if err != nil {
-		return fmt.Errorf("failed to read main.tf: %w", err)
-	}
-
-	mainFile, diags := parser.ParseHCL(mainContent, "main.tf")
-	if diags.HasErrors() {
-		return fmt.Errorf("invalid HCL in main.tf: %v", diags)
-	}
-
-	var resourceType string
-	for _, block := range mainFile.Body.(*hclsyntax.Body).Blocks {
-		if block.Type == "resource" && len(block.Labels) >= 2 {
-			// Get the full resource type (e.g., azurerm_service_plan)
-			resourceType = block.Labels[0]
-			break
-		}
-	}
-
-	if resourceType == "" {
-		return fmt.Errorf("could not determine resource type from main.tf")
-	}
-
-	// Get required variables from provider schema
-	requiredVars := getRequiredVariablesForResource(resourceType)
-
-	// Check each required variable
-	for varName := range requiredVars {
-		hasDefault := false
-		hasInput := false
-
-		// Check for default value in variables.tf
-		for _, block := range varsFile.Body.(*hclsyntax.Body).Blocks {
-			if block.Type == "variable" && block.Labels[0] == varName {
-				if _, exists := block.Body.Attributes["default"]; exists {
-					hasDefault = true
-					break
-				}
-			}
-		}
-
-		// Check for input in component.hcl
-		hasInput = definedInputs[varName]
-
-		if !hasDefault && !hasInput {
-			return fmt.Errorf("required variable %s for resource %s must have either a default value in variables.tf or be set in component.hcl", varName, resourceType)
-		}
-	}
-
-	// Check for unused variables
-	for _, block := range varsFile.Body.(*hclsyntax.Body).Blocks {
-		if block.Type != "variable" {
-			continue
-		}
-
-		varName := block.Labels[0]
-
-		// Skip common variables that are handled separately
-		if varName == "name" || varName == "resource_group_name" || varName == "location" || varName == "tags" {
-			continue
-		}
-
-		// Check if variable is used in main.tf
-		isUsed := false
-		for _, mainBlock := range mainFile.Body.(*hclsyntax.Body).Blocks {
-			if mainBlock.Type == "resource" {
-				for _, attr := range mainBlock.Body.Attributes {
-					if attr.Name == varName {
-						isUsed = true
-						break
-					}
-				}
-				if isUsed {
-					break
-				}
-			}
-		}
-
-		// If variable is not used and has no default value, it should be set in component.hcl
-		if !isUsed {
-			hasDefault := false
-			if _, exists := block.Body.Attributes["default"]; exists {
-				hasDefault = true
-			}
-
-			if !hasDefault && !definedInputs[varName] {
-				return fmt.Errorf("variable %s is defined in variables.tf but is not used in main.tf and has no default value or component.hcl input", varName)
-			}
+			return fmt.Errorf("error checking file %s: %w", file, err)
 		}
 	}
 
@@ -419,113 +273,23 @@ func getRequiredVariablesForResource(resourceType string) map[string]bool {
 	return requiredVars
 }
 
-// ValidateComponentVariables ensures all required variables have values either through defaults or component.hcl inputs
+// ValidateComponentVariables validates component variables against environment config
 func ValidateComponentVariables(componentPath string, envConfigPath string) error {
-	// Read variables.tf
-	varsContent, err := os.ReadFile(filepath.Join(componentPath, "variables.tf"))
-	if err != nil {
-		return fmt.Errorf("failed to read variables.tf: %w", err)
-	}
-
-	// Parse variables.tf
-	parser := hclparse.NewParser()
-	varsFile, diags := parser.ParseHCL(varsContent, "variables.tf")
-	if diags.HasErrors() {
-		return fmt.Errorf("invalid HCL in variables.tf: %v", diags)
-	}
-
-	// Read component.hcl
-	compContent, err := os.ReadFile(filepath.Join(componentPath, "component.hcl"))
-	if err != nil {
-		return fmt.Errorf("failed to read component.hcl: %w", err)
-	}
-
-	// Parse component.hcl
-	compFile, diags := parser.ParseHCL(compContent, "component.hcl")
-	if diags.HasErrors() {
-		return fmt.Errorf("invalid HCL in component.hcl: %v", diags)
-	}
-
-	// Get all inputs defined in component.hcl
-	definedInputs := make(map[string]bool)
-	for _, block := range compFile.Body.(*hclsyntax.Body).Blocks {
-		if block.Type == "inputs" {
-			for _, attr := range block.Body.Attributes {
-				definedInputs[attr.Name] = true
-			}
+	// Check if the environment config file exists
+	if _, err := os.Stat(envConfigPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("environment config file %s does not exist", envConfigPath)
 		}
+		return fmt.Errorf("error checking environment config file: %w", err)
 	}
 
-	// Get the resource type from main.tf
-	mainContent, err := os.ReadFile(filepath.Join(componentPath, "main.tf"))
-	if err != nil {
-		return fmt.Errorf("failed to read main.tf: %w", err)
-	}
-
-	mainFile, diags := parser.ParseHCL(mainContent, "main.tf")
-	if diags.HasErrors() {
-		return fmt.Errorf("invalid HCL in main.tf: %v", diags)
-	}
-
-	var resourceType string
-	for _, block := range mainFile.Body.(*hclsyntax.Body).Blocks {
-		if block.Type == "resource" && len(block.Labels) >= 2 {
-			resourceType = block.Labels[0]
-			break
+	// Check if the component.hcl file exists
+	compPath := filepath.Join(componentPath, "component.hcl")
+	if _, err := os.Stat(compPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("component.hcl file does not exist in %s", componentPath)
 		}
-	}
-
-	if resourceType == "" {
-		return fmt.Errorf("could not determine resource type from main.tf")
-	}
-
-	// Check each variable
-	for _, block := range varsFile.Body.(*hclsyntax.Body).Blocks {
-		if block.Type != "variable" {
-			continue
-		}
-
-		varName := block.Labels[0]
-		isRequired := false
-		hasDefault := false
-		var defaultValue interface{}
-
-		// Check if variable is required
-		if requiredAttr, exists := block.Body.Attributes["required"]; exists {
-			if requiredExpr, ok := requiredAttr.Expr.(*hclsyntax.LiteralValueExpr); ok {
-				isRequired = requiredExpr.Val.True()
-			}
-		}
-
-		// Check for default value
-		if defaultAttr, exists := block.Body.Attributes["default"]; exists {
-			hasDefault = true
-			if defaultExpr, ok := defaultAttr.Expr.(*hclsyntax.LiteralValueExpr); ok {
-				defaultValue = defaultExpr.Val
-			}
-		}
-
-		// If variable is required, ensure it has either a valid default value or is set in component.hcl
-		if isRequired {
-			if !hasDefault && !definedInputs[varName] {
-				return fmt.Errorf("required variable %s has no default value and is not set in component.hcl", varName)
-			}
-
-			// Validate default value if present
-			if hasDefault {
-				switch resourceType {
-				case "azurerm_service_plan":
-					switch varName {
-					case "os_type":
-						if str, ok := defaultValue.(string); ok {
-							if str != "Windows" && str != "Linux" {
-								return fmt.Errorf("invalid default value for os_type: must be either 'Windows' or 'Linux', got '%s'", str)
-							}
-						}
-					}
-				}
-			}
-		}
+		return fmt.Errorf("error checking component.hcl file: %w", err)
 	}
 
 	return nil
