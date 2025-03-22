@@ -456,6 +456,29 @@ func ValidateComponentVariables(componentPath string, envConfigPath string) erro
 		}
 	}
 
+	// Get the resource type from main.tf
+	mainContent, err := os.ReadFile(filepath.Join(componentPath, "main.tf"))
+	if err != nil {
+		return fmt.Errorf("failed to read main.tf: %w", err)
+	}
+
+	mainFile, diags := parser.ParseHCL(mainContent, "main.tf")
+	if diags.HasErrors() {
+		return fmt.Errorf("invalid HCL in main.tf: %v", diags)
+	}
+
+	var resourceType string
+	for _, block := range mainFile.Body.(*hclsyntax.Body).Blocks {
+		if block.Type == "resource" && len(block.Labels) >= 2 {
+			resourceType = block.Labels[0]
+			break
+		}
+	}
+
+	if resourceType == "" {
+		return fmt.Errorf("could not determine resource type from main.tf")
+	}
+
 	// Check each variable
 	for _, block := range varsFile.Body.(*hclsyntax.Body).Blocks {
 		if block.Type != "variable" {
@@ -465,6 +488,7 @@ func ValidateComponentVariables(componentPath string, envConfigPath string) erro
 		varName := block.Labels[0]
 		isRequired := false
 		hasDefault := false
+		var defaultValue interface{}
 
 		// Check if variable is required
 		if requiredAttr, exists := block.Body.Attributes["required"]; exists {
@@ -474,14 +498,32 @@ func ValidateComponentVariables(componentPath string, envConfigPath string) erro
 		}
 
 		// Check for default value
-		if _, exists := block.Body.Attributes["default"]; exists {
+		if defaultAttr, exists := block.Body.Attributes["default"]; exists {
 			hasDefault = true
+			if defaultExpr, ok := defaultAttr.Expr.(*hclsyntax.LiteralValueExpr); ok {
+				defaultValue = defaultExpr.Val
+			}
 		}
 
-		// If variable is required, ensure it has either a default value or is set in component.hcl
+		// If variable is required, ensure it has either a valid default value or is set in component.hcl
 		if isRequired {
 			if !hasDefault && !definedInputs[varName] {
 				return fmt.Errorf("required variable %s has no default value and is not set in component.hcl", varName)
+			}
+
+			// Validate default value if present
+			if hasDefault {
+				switch resourceType {
+				case "azurerm_service_plan":
+					switch varName {
+					case "os_type":
+						if str, ok := defaultValue.(string); ok {
+							if str != "Windows" && str != "Linux" {
+								return fmt.Errorf("invalid default value for os_type: must be either 'Windows' or 'Linux', got '%s'", str)
+							}
+						}
+					}
+				}
 			}
 		}
 	}
