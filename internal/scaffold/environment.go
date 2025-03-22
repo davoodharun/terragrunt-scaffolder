@@ -10,30 +10,41 @@ import (
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 )
 
-func generateEnvironment(subName, region string, env config.Environment, mainConfig *config.MainConfig) error {
-	logger.Info("Generating environment: %s/%s/%s", subName, region, env.Name)
-
+func generateEnvironment(subscription, region string, envName string, components []config.RegionComponent, infraPath string) error {
 	// Create environment base path
-	basePath := filepath.Join(".infrastructure", subName, region, env.Name)
+	basePath := filepath.Join(infraPath, subscription, region, envName)
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return fmt.Errorf("failed to create environment directory: %w", err)
 	}
 
-	// Get environment prefix
-	envPrefix := getEnvironmentPrefix(env.Name)
-
-	// Create environment-level config
-	envConfig := fmt.Sprintf(`locals {
+	// Create environment.hcl
+	envHclContent := fmt.Sprintf(`locals {
   environment_name = "%s"
   environment_prefix = "%s"
-}`, env.Name, envPrefix)
+}`, envName, getEnvironmentPrefix(envName))
 
-	if err := createFile(filepath.Join(basePath, "environment.hcl"), envConfig); err != nil {
-		return err
+	if err := createFile(filepath.Join(basePath, "environment.hcl"), envHclContent); err != nil {
+		return fmt.Errorf("failed to create environment.hcl: %w", err)
 	}
 
-	// Get components for the region
-	components := mainConfig.Stack.Architecture.Regions[region]
+	// Create region.hcl
+	regionHclContent := fmt.Sprintf(`locals {
+  region_name = "%s"
+  region_prefix = "%s"
+}`, region, getRegionPrefix(region))
+
+	if err := createFile(filepath.Join(basePath, "region.hcl"), regionHclContent); err != nil {
+		return fmt.Errorf("failed to create region.hcl: %w", err)
+	}
+
+	// Create subscription.hcl
+	subHclContent := fmt.Sprintf(`locals {
+  subscription_name = "%s"
+}`, subscription)
+
+	if err := createFile(filepath.Join(basePath, "subscription.hcl"), subHclContent); err != nil {
+		return fmt.Errorf("failed to create subscription.hcl: %w", err)
+	}
 
 	// Generate component directories and their apps
 	for _, comp := range components {
@@ -43,7 +54,6 @@ func generateEnvironment(subName, region string, env config.Environment, mainCon
 		}
 
 		if len(comp.Apps) > 0 {
-			logger.Info("Generating apps for component %s", comp.Component)
 			// Create app-specific folders and terragrunt files
 			for _, app := range comp.Apps {
 				appPath := filepath.Join(compPath, app)
@@ -69,7 +79,6 @@ locals {
 				}
 			}
 		} else {
-			logger.Info("Generating single component %s", comp.Component)
 			// Create single terragrunt.hcl for components without apps
 			terragruntContent := fmt.Sprintf(`include "root" {
   path = find_in_parent_folders("root.hcl")

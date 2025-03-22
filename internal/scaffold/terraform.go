@@ -179,7 +179,7 @@ resource "%s" "this" {
 
 	// Generate attribute assignments - separate required and optional
 	for name, attr := range resourceSchema.Block.Attributes {
-		if shouldSkipVariable(name) {
+		if shouldSkipVariable(name, comp.Source) {
 			continue
 		}
 
@@ -249,29 +249,37 @@ output "name" {
 		comp.Source, comp.Source, comp.Source, comp.Source)
 }
 
-func shouldSkipVariable(name string) bool {
-	// Common variables we define ourselves
-	commonVars := map[string]bool{
-		"name":                true,
-		"resource_group_name": true,
-		"location":            true,
-		"tags":                true,
+func shouldSkipVariable(name string, resourceType string) bool {
+	// Skip common variables that are handled separately
+	commonVars := []string{
+		"name",
+		"resource_group_name",
+		"location",
+		"tags",
 	}
 
-	// Common computed fields that should not be inputs
-	computedFields := map[string]bool{
-		"id":                                    true,
-		"principal_id":                          true,
-		"tenant_id":                             true,
-		"object_id":                             true,
-		"type":                                  true,
-		"identity":                              true,
-		"system_assigned_identity":              true,
-		"system_assigned_principal_id":          true,
-		"system_assigned_identity_principal_id": true,
+	for _, v := range commonVars {
+		if name == v {
+			return true
+		}
 	}
 
-	return commonVars[name] || computedFields[name]
+	// Skip certain attributes for specific resource types
+	skipForResource := map[string][]string{
+		"azurerm_redis_cache": {
+			"zones", // zones is not used in the current implementation
+		},
+	}
+
+	if attrs, ok := skipForResource[resourceType]; ok {
+		for _, attr := range attrs {
+			if name == attr {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func generateVariablesTF(schema *ProviderSchema, comp config.Component) string {
@@ -331,7 +339,7 @@ variable "tags" {
 		// Add resource-specific variables based on schema
 		for name, attr := range resourceSchema.Block.Attributes {
 			// Skip common variables and computed fields
-			if shouldSkipVariable(name) {
+			if shouldSkipVariable(name, comp.Source) {
 				continue
 			}
 

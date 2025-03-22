@@ -98,11 +98,8 @@ func getInfrastructurePath() string {
 }
 
 func Generate() error {
-	logger.Info("Starting terragrunt scaffolding generation")
-
 	// Get the infrastructure path
 	infraPath := ".infrastructure"
-	logger.Info("Using infrastructure path: %s", infraPath)
 
 	// Read TGS config
 	tgsConfig, err := ReadTGSConfig()
@@ -110,12 +107,8 @@ func Generate() error {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}
 
-	// Track existing and planned subscriptions
+	// Track existing subscriptions
 	existingSubs := make(map[string]bool)
-	plannedSubs := make(map[string]bool)
-
-	// Track all components that will be used
-	plannedComponents := make(map[string]bool)
 
 	// Get existing subscriptions (excluding special directories)
 	if entries, err := os.ReadDir(infraPath); err == nil {
@@ -137,6 +130,8 @@ func Generate() error {
 		return fmt.Errorf("failed to create base directory: %w", err)
 	}
 
+	logger.Success("Infrastructure folder created")
+
 	// Generate root.hcl
 	if err := generateRootHCL(tgsConfig, infraPath); err != nil {
 		return fmt.Errorf("failed to generate root.hcl: %w", err)
@@ -147,11 +142,8 @@ func Generate() error {
 		return fmt.Errorf("failed to generate environment config files: %w", err)
 	}
 
-	// Track processed stacks to avoid duplicate component generation
-	processedStacks := make(map[string]bool)
-
-	// Count total components for progress bar
-	totalComponents := 0
+	// First pass: collect all unique components and their configurations
+	uniqueComponents := make(map[string]config.Component)
 	for _, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
 			stackName := "main"
@@ -164,84 +156,38 @@ func Generate() error {
 				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}
 
-			totalComponents += len(mainConfig.Stack.Components)
+			// Add components from this stack
+			for compName, comp := range mainConfig.Stack.Components {
+				uniqueComponents[compName] = comp
+			}
 		}
 	}
+
+	// Create components directory
+	componentsDir := filepath.Join(baseDir, "_components")
+	if err := os.MkdirAll(componentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create components directory: %w", err)
+	}
+
+	logger.Success("Components created")
 
 	// Start progress bar for component generation
-	logger.StartProgress("Generating components", totalComponents)
+	logger.StartProgress("Generating components", len(uniqueComponents))
 
-	// First pass: collect all components that will be used
-	for _, sub := range tgsConfig.Subscriptions {
-		for _, env := range sub.Environments {
-			stackName := "main"
-			if env.Stack != "" {
-				stackName = env.Stack
-			}
-
-			mainConfig, err := readMainConfig(stackName)
-			if err != nil {
-				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
-			}
-
-			// Mark all components in this stack as planned
-			for compName := range mainConfig.Stack.Components {
-				plannedComponents[compName] = true
-			}
-		}
+	// Generate each unique component once
+	mainConfig := &config.MainConfig{
+		Stack: config.StackConfig{
+			Components: uniqueComponents,
+		},
 	}
 
-	// Clean up unused components in _components directory
-	componentsDir := filepath.Join(baseDir, "_components")
-	if entries, err := os.ReadDir(componentsDir); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() && !plannedComponents[entry.Name()] {
-				componentPath := filepath.Join(componentsDir, entry.Name())
-				logger.Info("Removing unused component directory: %s", componentPath)
-				if err := os.RemoveAll(componentPath); err != nil {
-					logger.Warning("Failed to remove component directory: %v", err)
-				}
-			}
-		}
+	// Generate components with all necessary files and validation
+	if err := generateComponents(mainConfig); err != nil {
+		return fmt.Errorf("failed to generate components: %w", err)
 	}
 
-	// Create subscription directories and configs
+	// Process each subscription for environment structure
 	for subName, sub := range tgsConfig.Subscriptions {
-		plannedSubs[subName] = true
-		subPath := filepath.Join(baseDir, subName)
-
-		// Track existing and planned environments for this subscription
-		existingEnvs := make(map[string]map[string]bool) // map[region]map[env]bool
-		plannedEnvs := make(map[string]map[string]bool)  // map[region]map[env]bool
-
-		// Get existing environments
-		if regions, err := os.ReadDir(subPath); err == nil {
-			for _, region := range regions {
-				if region.IsDir() {
-					regionPath := filepath.Join(subPath, region.Name())
-					if envs, err := os.ReadDir(regionPath); err == nil {
-						if existingEnvs[region.Name()] == nil {
-							existingEnvs[region.Name()] = make(map[string]bool)
-						}
-						for _, env := range envs {
-							if env.IsDir() {
-								existingEnvs[region.Name()][env.Name()] = true
-							}
-						}
-					}
-				}
-			}
-		}
-
-		if err := os.MkdirAll(subPath, 0755); err != nil {
-			return fmt.Errorf("failed to create subscription directory: %w", err)
-		}
-
-		// Create subscription.hcl
-		if err := createSubscriptionConfig(subPath, subName, sub); err != nil {
-			return fmt.Errorf("failed to create subscription config: %w", err)
-		}
-
 		// Process each environment with its specified stack
 		for _, env := range sub.Environments {
 			stackName := "main"
@@ -255,100 +201,15 @@ func Generate() error {
 				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}
 
-			// Generate components for this stack if we haven't already
-			if !processedStacks[stackName] {
-				// Create components directory
-				componentsDir := filepath.Join(baseDir, "_components")
-				if err := os.MkdirAll(componentsDir, 0755); err != nil {
-					return fmt.Errorf("failed to create components directory: %w", err)
-				}
-
-				// Generate components with environment config
-				if err := generateComponentsWithEnvConfig(mainConfig, infraPath); err != nil {
-					return fmt.Errorf("failed to generate components for stack %s: %w", stackName, err)
-				}
-
-				// Generate basic Terraform files for components
-				if err := generateComponents(mainConfig); err != nil {
-					return fmt.Errorf("failed to generate basic Terraform files for stack %s: %w", stackName, err)
-				}
-
-				processedStacks[stackName] = true
-			}
-
-			// Create region directories and their contents
-			for region := range mainConfig.Stack.Architecture.Regions {
-				// Initialize planned environments map for this region
-				if plannedEnvs[region] == nil {
-					plannedEnvs[region] = make(map[string]bool)
-				}
-				plannedEnvs[region][env.Name] = true
-
-				// Remove existing environment directory if it exists (to handle stack changes)
-				envPath := filepath.Join(subPath, region, env.Name)
-				if _, err := os.Stat(envPath); err == nil {
-					logger.Info("Removing existing environment directory for stack change: %s", envPath)
-					if err := os.RemoveAll(envPath); err != nil {
-						logger.Warning("Failed to remove environment directory: %v", err)
-					}
-				}
-
-				regionPath := filepath.Join(subPath, region)
-				if err := os.MkdirAll(regionPath, 0755); err != nil {
-					return fmt.Errorf("failed to create region directory: %w", err)
-				}
-
-				// Create region.hcl
-				if err := createRegionConfig(regionPath, region); err != nil {
-					return fmt.Errorf("failed to create region config: %w", err)
-				}
-
-				// Create environment directory and its contents
-				if err := generateEnvironment(subName, region, env, mainConfig); err != nil {
-					return fmt.Errorf("failed to generate environment: %w", err)
-				}
-
-				// Update progress for each component in this region
-				for range mainConfig.Stack.Architecture.Regions[region] {
-					logger.UpdateProgress()
-				}
-			}
-		}
-
-		// Remove environments that are no longer in the configuration
-		for region, envs := range existingEnvs {
-			for env := range envs {
-				if plannedEnvs[region] == nil || !plannedEnvs[region][env] {
-					envPath := filepath.Join(subPath, region, env)
-					logger.Info("Removing environment directory: %s", envPath)
-					if err := os.RemoveAll(envPath); err != nil {
-						logger.Warning("Failed to remove environment directory: %v", err)
-					}
+			// Generate environment structure without re-validating components
+			for region, components := range mainConfig.Stack.Architecture.Regions {
+				if err := generateEnvironment(subName, region, env.Name, components, infraPath); err != nil {
+					return fmt.Errorf("failed to generate environment structure: %w", err)
 				}
 			}
 		}
 	}
 
-	// Remove subscriptions that are no longer in the configuration
-	for existingSub := range existingSubs {
-		if !plannedSubs[existingSub] {
-			subPath := filepath.Join(baseDir, existingSub)
-			logger.Info("Removing subscription directory: %s", subPath)
-			if err := os.RemoveAll(subPath); err != nil {
-				logger.Warning("Failed to remove subscription directory: %v", err)
-			}
-		}
-	}
-
-	// Finish progress bar
-	logger.FinishProgress()
-
-	// Validate generated configurations
-	if err := ValidateGeneratedConfigs(); err != nil {
-		return fmt.Errorf("validation of generated configurations failed: %w", err)
-	}
-
-	logger.Success("Terragrunt scaffolding generation complete")
 	return nil
 }
 

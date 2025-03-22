@@ -15,13 +15,14 @@ const (
 	WarningColor = "\033[1;33m%s\033[0m"
 	ErrorColor   = "\033[1;31m%s\033[0m"
 	DebugColor   = "\033[0;36m%s\033[0m"
-	ClearLine    = "\r\033[K"
 	MoveUp       = "\033[1A"
 	MoveDown     = "\033[1B"
+	ClearLine    = "\r\033[K"
 )
 
 var (
-	bar *progressbar.ProgressBar
+	bar     *progressbar.ProgressBar
+	history []string
 )
 
 // StartProgress initializes a progress bar with the given description and total
@@ -77,35 +78,97 @@ func sleep() {
 	time.Sleep(100 * time.Millisecond)
 }
 
+// shouldKeepInHistory determines if a success message should be kept in history
+func shouldKeepInHistory(message string) bool {
+	// Keep important success messages
+	importantMessages := []string{
+		"Infrastructure folder created",
+		"Components created",
+		"All components validated successfully",
+	}
+
+	for _, important := range importantMessages {
+		if strings.Contains(message, important) {
+			return true
+		}
+	}
+	return false
+}
+
+// printWithHistory prints a message and maintains the history
+func printWithHistory(message string, isSuccess bool) {
+	if bar != nil {
+		if isSuccess && shouldKeepInHistory(message) {
+			// Check if message already exists in history
+			exists := false
+			for _, msg := range history {
+				if msg == message {
+					exists = true
+					break
+				}
+			}
+			// Only add message to history if it doesn't already exist
+			if !exists {
+				history = append(history, message)
+			}
+		}
+
+		// Move up enough lines to show all history
+		for i := 0; i < len(history); i++ {
+			fmt.Print(MoveUp + ClearLine)
+		}
+
+		// Print all history
+		for _, msg := range history {
+			fmt.Println(msg)
+		}
+
+		// Print the current message
+		fmt.Println(message)
+
+		// Move back down to the progress bar
+		for i := 0; i < len(history)+1; i++ {
+			fmt.Print(MoveDown)
+		}
+	} else {
+		fmt.Println(message)
+	}
+}
+
 func Info(format string, args ...interface{}) {
 	sleep()
-	// Move up one line to write above the progress bar
-	fmt.Printf(MoveUp+ClearLine+InfoColor+"\n", fmt.Sprintf("ℹ️  "+format, args...))
+	message := fmt.Sprintf(InfoColor, fmt.Sprintf("ℹ️  "+format, args...))
+	printWithHistory(message, false)
 }
 
 func Success(format string, args ...interface{}) {
 	sleep()
-	fmt.Printf(MoveUp+ClearLine+NoticeColor+"\n", fmt.Sprintf("✅ "+format, args...))
+	message := fmt.Sprintf(NoticeColor, fmt.Sprintf("✅ "+format, args...))
+	printWithHistory(message, true)
 }
 
 func Warning(format string, args ...interface{}) {
 	sleep()
-	fmt.Printf(MoveUp+ClearLine+WarningColor+"\n", fmt.Sprintf("⚠️  "+format, args...))
+	message := fmt.Sprintf(WarningColor, fmt.Sprintf("⚠️  "+format, args...))
+	printWithHistory(message, false)
 }
 
 func Error(format string, args ...interface{}) {
 	sleep()
-	fmt.Printf(MoveUp+ClearLine+ErrorColor+"\n", fmt.Sprintf("❌ "+format, args...))
+	message := fmt.Sprintf(ErrorColor, fmt.Sprintf("❌ "+format, args...))
+	printWithHistory(message, false)
 }
 
 func Debug(format string, args ...interface{}) {
 	sleep()
-	fmt.Printf(MoveUp+ClearLine+DebugColor+"\n", fmt.Sprintf("🔍 "+format, args...))
+	message := fmt.Sprintf(DebugColor, fmt.Sprintf("🔍 "+format, args...))
+	printWithHistory(message, false)
 }
 
 func Section(name string) {
 	sleep()
-	fmt.Printf(MoveUp+ClearLine+"\n%s\n%s", strings.Repeat("=", len(name)+4), name)
+	message := fmt.Sprintf("\n%s\n%s", strings.Repeat("=", len(name)+4), name)
+	printWithHistory(message, false)
 }
 
 // StartSpinner starts a loading spinner with the given message
