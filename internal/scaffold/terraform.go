@@ -373,75 +373,67 @@ variable "%s" {
 }
 
 func generateSmartDefault(name string, attr SchemaAttribute) string {
-	// Handle common defaults
-	switch name {
-	case "tags":
-		return `default = {}`
-	case "os_type":
-		return `default = "Windows"`
-	case "sku_name":
-		return `default = "B1"`
-	case "worker_count":
-		return `default = 1`
-	case "maximum_elastic_worker_count":
-		return `default = 1`
-	case "per_site_scaling_enabled":
-		return `default = true`
-	case "app_service_environment_id":
-		return `default = ""`
-	case "id":
-		return `default = ""`
-	case "timeouts":
-		return `default = []`
-	case "app_settings":
-		return `default = {}`
-	case "tenant_settings":
-		return `default = {}`
-	case "enable_non_ssl_port":
-		return `default = false`
-	case "public_network_access_enabled":
-		return `default = true`
-	case "redis_version":
-		return `default = "6"`
-	case "shard_count":
-		return `default = 1`
-	case "minimum_tls_version":
-		return `default = "1.2"`
-	case "private_static_ip_address":
-		return `default = ""`
-	case "capacity":
-		return `default = 1`
-	case "family":
-		return `default = "C"`
-	case "replicas_per_primary":
-		return `default = 1`
-	case "subnet_id":
-		return `default = ""`
-	case "replicas_per_master":
-		return `default = 1`
-	case "patch_schedule":
-		return `default = []`
-	case "access_policy":
-		return `default = []`
+	if attr.Computed && !attr.Required && !attr.Optional {
+		return "" // No default for computed-only fields
 	}
 
-	// Handle type-specific defaults
-	switch attr.Type {
-	case "string":
-		return `default = ""`
-	case "number":
-		return `default = 0`
-	case "bool":
-		return `default = false`
-	case "list":
-		return `default = []`
-	case "map":
-		return `default = {}`
-	case "object":
-		return `default = {}`
-	default:
+	if !attr.Required && !attr.Optional {
 		return ""
 	}
+
+	switch v := attr.Type.(type) {
+	case string:
+		switch v {
+		case "string":
+			// Common naming patterns
+			if strings.Contains(name, "sku") {
+				return `default = "Standard"`
+			}
+			if strings.Contains(name, "tier") {
+				return `default = "Standard"`
+			}
+			if strings.Contains(name, "version") {
+				return `default = "latest"`
+			}
+			if strings.Contains(name, "kind") {
+				return `default = ""`
+			}
+			if strings.Contains(name, "enabled") {
+				return `default = true`
+			}
+			return `default = ""`
+		case "number":
+			if strings.Contains(name, "capacity") {
+				return "default = 1"
+			}
+			if strings.Contains(name, "count") {
+				return "default = 1"
+			}
+			return "default = 0"
+		case "bool":
+			if strings.Contains(name, "enabled") || strings.Contains(name, "enable") {
+				return "default = true"
+			}
+			return "default = false"
+		case "list":
+			return "default = []"
+		case "map":
+			return "default = {}"
+		}
+	case []interface{}:
+		if len(v) > 0 {
+			if typeStr, ok := v[0].(string); ok {
+				return generateSmartDefault(name, SchemaAttribute{
+					Type:        typeStr,
+					Required:    attr.Required,
+					Optional:    attr.Optional,
+					Computed:    attr.Computed,
+					Description: attr.Description,
+				})
+			}
+		}
+	}
+	return ""
 }
 
 func convertType(tfType interface{}) string {
@@ -499,67 +491,4 @@ variable "%s" {
   description = "%s configuration block"
   default     = []
 }`, blockName, strings.Join(attrs, "\n"), blockName)
-}
-
-// getRequiredAttributes returns a list of required attributes for a given resource type
-func getRequiredAttributes(schema *ProviderSchema, resourceType string) []string {
-	var resourceSchema struct {
-		Block struct {
-			Attributes map[string]SchemaAttribute `json:"attributes"`
-			BlockTypes map[string]struct {
-				Block struct {
-					Attributes map[string]SchemaAttribute `json:"attributes"`
-				} `json:"block"`
-				NestingMode string `json:"nesting_mode"`
-			} `json:"block_types"`
-		} `json:"block"`
-	}
-
-	// Try different provider keys
-	providerKeys := []string{
-		"registry.terraform.io/hashicorp/azurerm",
-		"hashicorp/azurerm",
-	}
-
-	var found bool
-	for _, key := range providerKeys {
-		if provider, ok := schema.ProviderSchema[key]; ok {
-			if rs, ok := provider.ResourceSchemas[resourceType]; ok {
-				resourceSchema = rs
-				found = true
-				break
-			}
-		}
-	}
-
-	if !found {
-		return []string{"name", "resource_group_name", "location"}
-	}
-
-	required := []string{"name", "resource_group_name", "location"} // Always include common required fields
-
-	for name, attr := range resourceSchema.Block.Attributes {
-		if shouldSkipVariable(name, resourceType) {
-			continue
-		}
-		if attr.Required {
-			required = append(required, name)
-		}
-	}
-
-	// Also check for required nested blocks
-	for blockName, blockType := range resourceSchema.Block.BlockTypes {
-		hasRequiredAttrs := false
-		for _, attr := range blockType.Block.Attributes {
-			if attr.Required {
-				hasRequiredAttrs = true
-				break
-			}
-		}
-		if hasRequiredAttrs {
-			required = append(required, blockName)
-		}
-	}
-
-	return required
 }

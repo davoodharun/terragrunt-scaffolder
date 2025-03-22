@@ -203,9 +203,14 @@ locals {
 				switch compName {
 				case "serviceplan":
 					configContent.WriteString(`  # Service Plan Configuration
-  service_plan = {
-    sku_name = "` + getDefaultSkuForEnvironment(envName) + `"
-    os_type = "Linux"
+  serviceplan = {
+    sku = {
+      name     = "` + getDefaultSkuForEnvironment(envName) + `"
+      tier     = "Standard"
+      size     = "` + getDefaultSkuForEnvironment(envName) + `"
+      capacity = 1
+    }
+    os_type      = "Linux"
     worker_count = 1
   }
 

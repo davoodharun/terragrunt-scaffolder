@@ -3,7 +3,6 @@ package scaffold
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -25,14 +24,6 @@ type Change struct {
 // Plan analyzes changes that would be applied to the infrastructure
 func Plan() error {
 	logger.Info("Analyzing infrastructure changes...")
-
-	// Verify Azure authentication
-	logger.Info("Verifying Azure authentication...")
-	if err := verifyAzureAuth(); err != nil {
-		logger.Warning("Azure authentication verification failed: %v\nPlease run 'az login' to authenticate with Azure", err)
-	} else {
-		logger.Success("Azure authentication verified")
-	}
 
 	// Read TGS config
 	tgsConfig, err := ReadTGSConfig()
@@ -426,55 +417,6 @@ func Plan() error {
 				}
 			}
 		}
-	}
-
-	return nil
-}
-
-// verifyAzureAuth checks if the user is properly authenticated with Azure
-func verifyAzureAuth() error {
-	// Create a temporary directory for terraform schema cache
-	tmpDir, err := os.MkdirTemp("", "tf-schema-cache")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Create a temporary terraform configuration to test authentication
-	testConfig := `
-terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.0"
-    }
-  }
-}
-
-provider "azurerm" {
-  features {}
-}
-
-data "azurerm_client_config" "current" {}
-`
-
-	// Write the test configuration
-	if err := os.WriteFile(filepath.Join(tmpDir, "main.tf"), []byte(testConfig), 0644); err != nil {
-		return fmt.Errorf("failed to write test configuration: %w", err)
-	}
-
-	// Initialize terraform in the temporary directory
-	cmd := exec.Command("terraform", "init")
-	cmd.Dir = tmpDir
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("terraform init failed: %s\n%s", err, output)
-	}
-
-	// Try to read the client config
-	cmd = exec.Command("terraform", "plan", "-out=tfplan")
-	cmd.Dir = tmpDir
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("terraform plan failed: %s\n%s", err, output)
 	}
 
 	return nil
