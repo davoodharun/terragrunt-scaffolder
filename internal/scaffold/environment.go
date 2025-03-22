@@ -27,22 +27,32 @@ func generateEnvironment(subscription, region string, envName string, components
 		return fmt.Errorf("failed to create environment.hcl: %w", err)
 	}
 
-	// Create region.hcl
+	// Create region.hcl in the region directory
+	regionPath := filepath.Join(infraPath, subscription, region)
+	if err := os.MkdirAll(regionPath, 0755); err != nil {
+		return fmt.Errorf("failed to create region directory: %w", err)
+	}
+
 	regionHclContent := fmt.Sprintf(`locals {
   region_name = "%s"
   region_prefix = "%s"
 }`, region, getRegionPrefix(region))
 
-	if err := createFile(filepath.Join(basePath, "region.hcl"), regionHclContent); err != nil {
+	if err := createFile(filepath.Join(regionPath, "region.hcl"), regionHclContent); err != nil {
 		return fmt.Errorf("failed to create region.hcl: %w", err)
 	}
 
-	// Create subscription.hcl
+	// Create subscription.hcl in the subscription directory
+	subPath := filepath.Join(infraPath, subscription)
+	if err := os.MkdirAll(subPath, 0755); err != nil {
+		return fmt.Errorf("failed to create subscription directory: %w", err)
+	}
+
 	subHclContent := fmt.Sprintf(`locals {
   subscription_name = "%s"
 }`, subscription)
 
-	if err := createFile(filepath.Join(basePath, "subscription.hcl"), subHclContent); err != nil {
+	if err := createFile(filepath.Join(subPath, "subscription.hcl"), subHclContent); err != nil {
 		return fmt.Errorf("failed to create subscription.hcl: %w", err)
 	}
 
