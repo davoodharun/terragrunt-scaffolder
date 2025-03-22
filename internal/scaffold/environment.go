@@ -48,9 +48,22 @@ func generateEnvironment(subscription, region string, envName string, components
 		return fmt.Errorf("failed to create subscription directory: %w", err)
 	}
 
+	// Get the subscription configuration to access remote state details
+	subConfig, err := ReadTGSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to read TGS config: %w", err)
+	}
+
+	sub, exists := subConfig.Subscriptions[subscription]
+	if !exists {
+		return fmt.Errorf("subscription %s not found in TGS config", subscription)
+	}
+
 	subHclContent := fmt.Sprintf(`locals {
   subscription_name = "%s"
-}`, subscription)
+  remote_state_resource_group = "%s"
+  remote_state_storage_account = "%s"
+}`, subscription, sub.RemoteState.ResourceGroup, sub.RemoteState.Name)
 
 	if err := createFile(filepath.Join(subPath, "subscription.hcl"), subHclContent); err != nil {
 		return fmt.Errorf("failed to create subscription.hcl: %w", err)
