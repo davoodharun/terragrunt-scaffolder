@@ -79,18 +79,43 @@ func (e ValidationError) Error() string {
 	return e.Message
 }
 
-// ValidateStack validates a stack configuration
+// ValidateStack validates a stack configuration according to Testing-Framework.md specifications
 func ValidateStack(stack *config.MainConfig) []error {
 	var errors []error
+
+	// Validate stack name
+	if stack.Stack.Name == "" {
+		errors = append(errors, ValidationError{
+			Context: "Stack",
+			Message: "name property must be filled",
+		})
+	}
+
+	// Validate version
+	if stack.Stack.Version == "" {
+		errors = append(errors, ValidationError{
+			Context: "Stack",
+			Message: "version property must be filled",
+		})
+	}
+
+	// Validate description
+	if stack.Stack.Description == "" {
+		errors = append(errors, ValidationError{
+			Context: "Stack",
+			Message: "description property must be filled",
+		})
+	}
 
 	// Validate components
 	if len(stack.Stack.Components) == 0 {
 		errors = append(errors, ValidationError{
 			Context: "Stack",
-			Message: "no components defined in stack",
+			Message: "at least one component must be defined",
 		})
 	}
 
+	// Validate each component
 	for compName, comp := range stack.Stack.Components {
 		compErrors := validateComponent(compName, comp)
 		errors = append(errors, compErrors...)
@@ -100,21 +125,15 @@ func ValidateStack(stack *config.MainConfig) []error {
 	if len(stack.Stack.Architecture.Regions) == 0 {
 		errors = append(errors, ValidationError{
 			Context: "Architecture",
-			Message: "no regions defined in architecture",
+			Message: "at least one region must be defined",
 		})
-	}
-
-	for region := range stack.Stack.Architecture.Regions {
-		if !ValidAzureRegions[region] {
-			errors = append(errors, ValidationError{
-				Context: fmt.Sprintf("Region '%s'", region),
-				Message: "invalid Azure region",
-			})
-		}
 	}
 
 	// Validate component references in architecture
 	errors = append(errors, validateArchitectureComponents(stack)...)
+
+	// Validate dependencies
+	errors = append(errors, validateDependencies(stack)...)
 
 	return errors
 }
@@ -122,34 +141,40 @@ func ValidateStack(stack *config.MainConfig) []error {
 // validateComponent validates a single component configuration
 func validateComponent(name string, comp config.Component) []error {
 	var errors []error
-	context := fmt.Sprintf("Component '%s'", name)
 
 	// Validate required fields
 	if comp.Source == "" {
 		errors = append(errors, ValidationError{
-			Context: context,
-			Message: "source is required",
+			Context: fmt.Sprintf("Component '%s'", name),
+			Message: "source property must be filled",
 		})
 	}
 
 	if comp.Provider == "" {
 		errors = append(errors, ValidationError{
-			Context: context,
-			Message: "provider is required",
+			Context: fmt.Sprintf("Component '%s'", name),
+			Message: "provider property must be filled",
 		})
 	}
 
 	if comp.Version == "" {
 		errors = append(errors, ValidationError{
-			Context: context,
-			Message: "version is required",
+			Context: fmt.Sprintf("Component '%s'", name),
+			Message: "version property must be filled",
+		})
+	}
+
+	if comp.Description == "" {
+		errors = append(errors, ValidationError{
+			Context: fmt.Sprintf("Component '%s'", name),
+			Message: "description property must be filled",
 		})
 	}
 
 	// Validate source is a valid Azure resource type
 	if comp.Source != "" && !ValidAzureResourceTypes[comp.Source] {
 		errors = append(errors, ValidationError{
-			Context: context,
+			Context: fmt.Sprintf("Component '%s'", name),
 			Message: fmt.Sprintf("invalid Azure resource type: %s", comp.Source),
 		})
 	}
@@ -159,7 +184,7 @@ func validateComponent(name string, comp config.Component) []error {
 		parts := strings.Split(dep, ".")
 		if len(parts) < 2 {
 			errors = append(errors, ValidationError{
-				Context: context,
+				Context: fmt.Sprintf("Component '%s'", name),
 				Message: fmt.Sprintf("invalid dependency format: %s (should be 'region.component' or 'region.component.app')", dep),
 			})
 			continue
@@ -168,7 +193,7 @@ func validateComponent(name string, comp config.Component) []error {
 		// Check if the region part is valid (could be a placeholder {region})
 		if parts[0] != "{region}" && !ValidAzureRegions[parts[0]] {
 			errors = append(errors, ValidationError{
-				Context: context,
+				Context: fmt.Sprintf("Component '%s'", name),
 				Message: fmt.Sprintf("invalid region in dependency: %s", parts[0]),
 			})
 		}
@@ -177,16 +202,17 @@ func validateComponent(name string, comp config.Component) []error {
 	return errors
 }
 
-// validateArchitectureComponents validates that all components referenced in the architecture exist in the components section
+// validateArchitectureComponents validates component references in the architecture
 func validateArchitectureComponents(stack *config.MainConfig) []error {
 	var errors []error
 
 	for region, components := range stack.Stack.Architecture.Regions {
 		for _, comp := range components {
+			// Check if component exists in components section
 			if _, exists := stack.Stack.Components[comp.Component]; !exists {
 				errors = append(errors, ValidationError{
 					Context: fmt.Sprintf("Region '%s'", region),
-					Message: fmt.Sprintf("component '%s' referenced in architecture but not defined in components", comp.Component),
+					Message: fmt.Sprintf("component '%s' referenced in architecture but not defined in components section", comp.Component),
 				})
 			}
 		}
@@ -195,7 +221,117 @@ func validateArchitectureComponents(stack *config.MainConfig) []error {
 	return errors
 }
 
-// ValidateTGSConfig validates the TGS configuration file
+// validateDependencies validates component dependencies
+func validateDependencies(stack *config.MainConfig) []error {
+	var errors []error
+
+	// First, build a map of components that are actually used in the architecture
+	usedComponents := make(map[string]bool)
+	for _, components := range stack.Stack.Architecture.Regions {
+		for _, comp := range components {
+			usedComponents[comp.Component] = true
+		}
+	}
+
+	for compName, comp := range stack.Stack.Components {
+		for _, dep := range comp.Deps {
+			// Parse dependency string
+			parts := strings.Split(dep, ".")
+			if len(parts) < 2 {
+				errors = append(errors, ValidationError{
+					Context: fmt.Sprintf("Component '%s'", compName),
+					Message: fmt.Sprintf("invalid dependency format: %s", dep),
+				})
+				continue
+			}
+
+			// Get the component name from the dependency
+			depComponent := parts[1]
+
+			// Check if the component exists in the components section
+			if _, exists := stack.Stack.Components[depComponent]; !exists {
+				errors = append(errors, ValidationError{
+					Context: fmt.Sprintf("Component '%s'", compName),
+					Message: fmt.Sprintf("dependency references non-existent component '%s'", depComponent),
+				})
+				continue
+			}
+
+			// Check if the component is actually used in the architecture
+			if !usedComponents[depComponent] {
+				errors = append(errors, ValidationError{
+					Context: fmt.Sprintf("Component '%s'", compName),
+					Message: fmt.Sprintf("dependency references component '%s' which is defined but not used in the architecture", depComponent),
+				})
+				continue
+			}
+
+			// If using concrete region (not {region}), validate it exists
+			region := parts[0]
+			if !strings.Contains(region, "{region}") {
+				if _, exists := stack.Stack.Architecture.Regions[region]; !exists {
+					errors = append(errors, ValidationError{
+						Context: fmt.Sprintf("Component '%s'", compName),
+						Message: fmt.Sprintf("dependency references non-existent region: %s", region),
+					})
+				}
+			}
+
+			// If app is specified, validate it exists in the architecture
+			if len(parts) > 2 {
+				app := parts[2]
+				// Skip validation if using {app} template
+				if app == "{app}" {
+					continue
+				}
+
+				// For concrete apps, verify they exist in the architecture
+				found := false
+				// If using {region}, check all regions
+				if region == "{region}" {
+					for _, regionComps := range stack.Stack.Architecture.Regions {
+						for _, rc := range regionComps {
+							if rc.Component == depComponent {
+								for _, a := range rc.Apps {
+									if a == app {
+										found = true
+										break
+									}
+								}
+							}
+						}
+						if found {
+							break
+						}
+					}
+				} else if regionComps, exists := stack.Stack.Architecture.Regions[region]; exists {
+					// For concrete region, check only that region
+					for _, rc := range regionComps {
+						if rc.Component == depComponent {
+							for _, a := range rc.Apps {
+								if a == app {
+									found = true
+									break
+								}
+							}
+						}
+					}
+				}
+
+				if !found {
+					errors = append(errors, ValidationError{
+						Context: fmt.Sprintf("Component '%s'", compName),
+						Message: fmt.Sprintf("dependency references non-existent app '%s' for component '%s'", app, depComponent),
+					})
+				}
+			}
+		}
+	}
+
+	return errors
+}
+
+// ValidateTGSConfig validates the TGS configuration file according to Testing-Framework.md specifications
 func ValidateTGSConfig(cfg *config.TGSConfig) []error {
 	var errors []error
 
@@ -203,7 +339,7 @@ func ValidateTGSConfig(cfg *config.TGSConfig) []error {
 	if cfg.Name == "" {
 		errors = append(errors, ValidationError{
 			Context: "Project Name",
-			Message: "project name cannot be empty",
+			Message: "name property must be filled",
 		})
 	}
 
@@ -217,18 +353,18 @@ func ValidateTGSConfig(cfg *config.TGSConfig) []error {
 
 	// Validate each subscription
 	for subName, sub := range cfg.Subscriptions {
-		// Validate remote state configuration
+		// Validate remote state
 		if sub.RemoteState.Name == "" {
 			errors = append(errors, ValidationError{
-				Context: fmt.Sprintf("Subscription '%s' Remote State", subName),
-				Message: "storage account name cannot be empty",
+				Context: fmt.Sprintf("Subscription '%s'", subName),
+				Message: "remotestate.name property must be filled",
 			})
 		}
 
 		if sub.RemoteState.ResourceGroup == "" {
 			errors = append(errors, ValidationError{
-				Context: fmt.Sprintf("Subscription '%s' Remote State", subName),
-				Message: "resource group name cannot be empty",
+				Context: fmt.Sprintf("Subscription '%s'", subName),
+				Message: "remotestate.resource_group property must be filled",
 			})
 		}
 
@@ -241,11 +377,11 @@ func ValidateTGSConfig(cfg *config.TGSConfig) []error {
 		}
 
 		// Validate each environment
-		for _, env := range sub.Environments {
+		for i, env := range sub.Environments {
 			if env.Name == "" {
 				errors = append(errors, ValidationError{
-					Context: fmt.Sprintf("Subscription '%s' Environment", subName),
-					Message: "environment name cannot be empty",
+					Context: fmt.Sprintf("Subscription '%s' Environment %d", subName, i+1),
+					Message: "environment name must be filled",
 				})
 			}
 		}

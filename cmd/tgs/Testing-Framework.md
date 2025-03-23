@@ -27,3 +27,29 @@
     - within each environment folder there is an application folder listed for a component that exists in _components
     - if that application has multiple instances, there should be sub folders within that application folder; each sub folder will contain a terragrunt.hcl file with an include statement that references the respective component in the _component directory
     - if that application only has one instance, then there is a terragrunt.hcl file in that foler that references the respective component in the _component directory
+
+
+
+## Validation of config files
+
+### tgs.yaml
+
+- name property value needs to exist
+- at least one subscription needs to be listed
+- for each subscription, the remotestate property needs to be filled
+- there needs to be at least one environment in each subscription
+- each environment needs to specify a stack that exists in the .tgs/stack folder
+
+### stack.yaml files
+- name property should be filled
+- version property should be filled
+- description property should be filled
+- there should be at least one component listed
+- each component should have
+    - source
+    - provider
+    - version
+    - description
+- at least one region should be defined under the architecture property
+- if a component is listed with in a region, the component property should match the name of a component in the components section.
+- in the components section, the dependencies should reference regions and applications/components that exist in the architecture section
