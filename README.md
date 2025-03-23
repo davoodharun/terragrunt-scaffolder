@@ -80,6 +80,8 @@ For a detailed understanding of how the tool works:
    - Edit `.tgs/tgs.yaml` to set your project name and Azure subscription details
    - Edit `.tgs/stacks/main.yaml` to define your infrastructure components
 
+   For detailed configuration instructions and examples, see the [Configuration Guide](CONFIGURATION.md).
+
 7. **Generate the infrastructure**:
    ```bash
    tgs generate
