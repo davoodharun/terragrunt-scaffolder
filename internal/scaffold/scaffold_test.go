@@ -6,135 +6,270 @@ import (
 	"testing"
 )
 
+// TestPath defines the structure for test path validation
+type TestPath struct {
+	path     string
+	isDir    bool
+	required bool
+}
+
 func TestGenerateCommand(t *testing.T) {
-	// Create a temporary directory for testing
-	tmpDir, err := os.MkdirTemp("", "tgs-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Change to temp directory
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("Failed to change to temp directory: %v", err)
-	}
-	defer os.Chdir(originalDir)
-
-	// Create minimal tgs.yaml for testing
-	tgsConfig := `
-name: test-project
+	testCases := []struct {
+		name        string
+		tgsConfig   string
+		stackConfig string
+	}{
+		{
+			name: "Simple single environment",
+			tgsConfig: `name: CUSTTP
 subscriptions:
-  test-sub:
-    remote_state:
-      resource_group: test-rg
-      name: test-storage
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  components:
+    appservice:
+      source: azurerm_app_service
+      provider: azurerm
+      version: 4.22.0
+  architecture:
+    regions:
+      eastus2:
+        - component: appservice
+          apps: []`,
+		},
+		{
+			name: "Multiple environments and regions",
+			tgsConfig: `name: CUSTTP
+subscriptions:
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
     environments:
       - name: dev
         stack: main
       - name: test
         stack: main
-      - name: stage
-        stack: main
+  prod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-P-TFSTATE-RGP
+    environments:
       - name: prod
-        stack: main
-`
-	if err := os.WriteFile("tgs.yaml", []byte(tgsConfig), 0644); err != nil {
-		t.Fatalf("Failed to create tgs.yaml: %v", err)
-	}
-
-	// Create minimal main.yaml for testing
-	mainConfig := `
-stack:
+        stack: main`,
+			stackConfig: `stack:
   components:
-    test_component:
-      source: azurerm_resource_group
+    rediscache:
+      source: azurerm_redis_cache
       provider: azurerm
-      version: "3.0.0"
+      version: 4.22.0
+      deps: []
+    appservice:
+      source: azurerm_app_service
+      provider: azurerm
+      version: 4.22.0
+      deps:
+        - "eastus2.redis"
+        - "{region}.serviceplan.{app}"
+    serviceplan:
+      source: azurerm_service_plan
+      provider: azurerm
+      version: 4.22.0 
+      deps: []
   architecture:
     regions:
       eastus2:
-        - component: test_component
-`
-	stacksDir := filepath.Join(".tgs", "stacks")
-	if err := os.MkdirAll(stacksDir, 0755); err != nil {
-		t.Fatalf("Failed to create stacks directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(stacksDir, "main.yaml"), []byte(mainConfig), 0644); err != nil {
-		t.Fatalf("Failed to create main.yaml: %v", err)
-	}
-
-	// Run generate command
-	if err := Generate(); err != nil {
-		t.Fatalf("Generate command failed: %v", err)
-	}
-
-	// Test cases for directory and file existence
-	testCases := []struct {
-		name     string
-		path     string
-		isDir    bool
-		required bool
-	}{
-		// Infrastructure directory
-		{"Infrastructure directory", ".infrastructure", true, true},
-
-		// Config directory and files
-		{"Config directory", filepath.Join(".infrastructure", "config"), true, true},
-		{"Config stack directory", filepath.Join(".infrastructure", "config", "main"), true, true},
-		{"Global config", filepath.Join(".infrastructure", "config", "global.hcl"), false, true},
-		{"Dev config", filepath.Join(".infrastructure", "config", "main", "dev.hcl"), false, true},
-		{"Test config", filepath.Join(".infrastructure", "config", "main", "test.hcl"), false, true},
-		{"Stage config", filepath.Join(".infrastructure", "config", "main", "stage.hcl"), false, true},
-		{"Prod config", filepath.Join(".infrastructure", "config", "main", "prod.hcl"), false, true},
-
-		// Components directory
-		{"Components directory", filepath.Join(".infrastructure", "_components"), true, true},
-		{"Components stack directory", filepath.Join(".infrastructure", "_components", "main"), true, true},
-		{"Component directory", filepath.Join(".infrastructure", "_components", "main", "test_component"), true, true},
-		{"Component files", filepath.Join(".infrastructure", "_components", "main", "test_component", "component.hcl"), false, true},
-		{"Main TF", filepath.Join(".infrastructure", "_components", "main", "test_component", "main.tf"), false, true},
-		{"Variables TF", filepath.Join(".infrastructure", "_components", "main", "test_component", "variables.tf"), false, true},
-		{"Provider TF", filepath.Join(".infrastructure", "_components", "main", "test_component", "provider.tf"), false, true},
-
-		// Subscription structure
-		{"Subscription directory", filepath.Join(".infrastructure", "test-sub"), true, true},
-		{"Subscription config", filepath.Join(".infrastructure", "test-sub", "subscription.hcl"), false, true},
-
-		// Region structure
-		{"Region directory", filepath.Join(".infrastructure", "test-sub", "eastus2"), true, true},
-		{"Region config", filepath.Join(".infrastructure", "test-sub", "eastus2", "region.hcl"), false, true},
-
-		// Environment structure
-		{"Dev environment directory", filepath.Join(".infrastructure", "test-sub", "eastus2", "dev"), true, true},
-		{"Test environment directory", filepath.Join(".infrastructure", "test-sub", "eastus2", "test"), true, true},
-		{"Stage environment directory", filepath.Join(".infrastructure", "test-sub", "eastus2", "stage"), true, true},
-		{"Prod environment directory", filepath.Join(".infrastructure", "test-sub", "eastus2", "prod"), true, true},
-
-		// Component in environment
-		{"Component in dev", filepath.Join(".infrastructure", "test-sub", "eastus2", "dev", "test_component"), true, true},
-		{"Terragrunt config in dev", filepath.Join(".infrastructure", "test-sub", "eastus2", "dev", "test_component", "terragrunt.hcl"), false, true},
+        - component: rediscache
+          apps: []
+        - component: serviceplan
+          apps: 
+            - api
+            - web
+        - component: appservice
+          apps:
+            - api
+            - web
+      westus:
+        - component: serviceplan
+          apps: 
+            - api
+            - web
+        - component: appservice
+          apps:
+            - api
+            - web`,
+		},
+		{
+			name: "Component with dependencies",
+			tgsConfig: `name: CUSTTP
+subscriptions:
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  components:
+    redis:
+      source: azurerm_redis_cache
+      provider: azurerm
+      version: 4.22.0
+    appservice:
+      source: azurerm_app_service
+      provider: azurerm
+      version: 4.22.0
+      deps:
+        - "{region}.redis"
+  architecture:
+    regions:
+      eastus2:
+        - component: redis
+          apps: []
+        - component: appservice
+          apps:
+            - api`,
+		},
 	}
 
-	// Run test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			info, err := os.Stat(tc.path)
+			// Create temporary directory
+			tmpDir, err := os.MkdirTemp("", "tgs-test-*")
 			if err != nil {
-				if tc.required {
-					t.Errorf("Required path %s does not exist: %v", tc.path, err)
-				}
-				return
+				t.Fatalf("Failed to create temp directory: %v", err)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			// Save current directory and change to temp directory
+			currentDir, err := os.Getwd()
+			if err != nil {
+				t.Fatalf("Failed to get current directory: %v", err)
+			}
+			if err := os.Chdir(tmpDir); err != nil {
+				t.Fatalf("Failed to change to temp directory: %v", err)
+			}
+			defer os.Chdir(currentDir)
+
+			// Create .tgs directory and config files
+			tgsDir := filepath.Join(tmpDir, ".tgs")
+			stacksDir := filepath.Join(tgsDir, "stacks")
+			if err := os.MkdirAll(stacksDir, 0755); err != nil {
+				t.Fatalf("Failed to create .tgs/stacks directory: %v", err)
 			}
 
-			if tc.isDir && !info.IsDir() {
-				t.Errorf("Expected %s to be a directory", tc.path)
+			// Write tgs.yaml
+			if err := os.WriteFile(filepath.Join(tgsDir, "tgs.yaml"), []byte(tc.tgsConfig), 0644); err != nil {
+				t.Fatalf("Failed to write tgs.yaml: %v", err)
 			}
-			if !tc.isDir && info.IsDir() {
-				t.Errorf("Expected %s to be a file", tc.path)
+
+			// Write main.yaml stack file
+			if err := os.WriteFile(filepath.Join(stacksDir, "main.yaml"), []byte(tc.stackConfig), 0644); err != nil {
+				t.Fatalf("Failed to write main.yaml: %v", err)
+			}
+
+			// Run generate command
+			if err := Generate(); err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+
+			// Define test paths based on the configuration
+			var testPaths []TestPath
+
+			// Add common paths
+			testPaths = append(testPaths,
+				TestPath{
+					path:     ".infrastructure",
+					isDir:    true,
+					required: true,
+				},
+				TestPath{
+					path:     ".infrastructure/config",
+					isDir:    true,
+					required: true,
+				},
+				TestPath{
+					path:     ".infrastructure/config/main",
+					isDir:    true,
+					required: true,
+				},
+				TestPath{
+					path:     ".infrastructure/_components",
+					isDir:    true,
+					required: true,
+				},
+				TestPath{
+					path:     ".infrastructure/_components/main",
+					isDir:    true,
+					required: true,
+				},
+			)
+
+			// Add paths based on configuration
+			if tc.name == "Simple single environment" {
+				testPaths = append(testPaths,
+					TestPath{
+						path:     ".infrastructure/nonprod/eastus2/dev/appservice",
+						isDir:    true,
+						required: true,
+					},
+				)
+			} else if tc.name == "Multiple environments and regions" {
+				testPaths = append(testPaths,
+					TestPath{
+						path:     ".infrastructure/nonprod/eastus2/dev/appservice/api",
+						isDir:    true,
+						required: true,
+					},
+					TestPath{
+						path:     ".infrastructure/prod/eastus2/prod/appservice/web",
+						isDir:    true,
+						required: true,
+					},
+					TestPath{
+						path:     ".infrastructure/nonprod/westus/test/appservice/api",
+						isDir:    true,
+						required: true,
+					},
+				)
+			} else if tc.name == "Component with dependencies" {
+				testPaths = append(testPaths,
+					TestPath{
+						path:     ".infrastructure/nonprod/eastus2/dev/redis",
+						isDir:    true,
+						required: true,
+					},
+					TestPath{
+						path:     ".infrastructure/nonprod/eastus2/dev/appservice/api",
+						isDir:    true,
+						required: true,
+					},
+				)
+			}
+
+			// Test all paths
+			for _, tp := range testPaths {
+				path := filepath.Join(tmpDir, tp.path)
+				info, err := os.Stat(path)
+				if tp.required {
+					if err != nil {
+						t.Errorf("Required path %s does not exist: %v", tp.path, err)
+						continue
+					}
+					if info.IsDir() != tp.isDir {
+						t.Errorf("Path %s: expected isDir=%v, got isDir=%v", tp.path, tp.isDir, info.IsDir())
+					}
+				} else if err == nil {
+					if info.IsDir() != tp.isDir {
+						t.Errorf("Optional path %s: expected isDir=%v, got isDir=%v", tp.path, tp.isDir, info.IsDir())
+					}
+				}
 			}
 		})
 	}

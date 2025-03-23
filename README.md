@@ -6,6 +6,10 @@ A tool for scaffolding Terraform and Terragrunt projects with standardized struc
 
 Terragrunt-scaffolder (tgs) helps you create and manage infrastructure-as-code projects using Terraform and Terragrunt. It generates a consistent directory structure, configuration files, and naming conventions based on your project specifications.
 
+For a detailed understanding of how the tool works:
+- [Generation Process Documentation](GENERATION_PROCESS.md) - Learn about the complete generation process and code flow
+- [Provider Schema Documentation](PROVIDER_SCHEMA.md) - Understand how the tool interacts with the Azure provider schema
+
 > **Note**: Currently, this tool only supports Azure cloud provider. Support for other cloud providers may be added in future releases.
 
 > **Important**: Before starting, ensure you have an Azure Storage Account created in your subscription. This storage account will be used to store Terraform state files. The storage account should be in a resource group that follows your organization's naming conventions.
@@ -80,7 +84,7 @@ Terragrunt-scaffolder (tgs) helps you create and manage infrastructure-as-code p
    ```bash
    tgs generate
    ```
-   This creates the Terragrunt configuration in the `.infrastructure` directory.
+   This creates the Terragrunt configuration in the `.infrastructure` directory. For a detailed explanation of the generation process, see the [Generation Process Documentation](GENERATION_PROCESS.md).
 
 8. **Create the storage container**:
    ```bash
@@ -132,6 +136,8 @@ Before using this tool, ensure you have the following prerequisites installed an
 ## Provider Setup
 
 The tool requires proper configuration of the Azure provider to interact with Azure resources. Here's how to set it up:
+
+> **Note**: For detailed information about how the tool interacts with the Azure provider schema, see the [Provider Schema Documentation](PROVIDER_SCHEMA.md).
 
 ### Azure Provider Configuration
 
