@@ -12,6 +12,21 @@ import (
 type TGSConfig struct {
 	Name          string                  `yaml:"name"`
 	Subscriptions map[string]Subscription `yaml:"subscriptions"`
+	Naming        NamingConfig            `yaml:"naming"`
+}
+
+// NamingConfig represents the resource naming configuration
+type NamingConfig struct {
+	Format           string                     `yaml:"format"`
+	ResourcePrefixes map[string]string          `yaml:"resource_prefixes"`
+	DefaultSeparator string                     `yaml:"separator"`
+	ComponentFormats map[string]ComponentFormat `yaml:"component_formats,omitempty"`
+}
+
+// ComponentFormat represents a custom format for a specific component
+type ComponentFormat struct {
+	Format    string `yaml:"format"`
+	Separator string `yaml:"separator,omitempty"`
 }
 
 // Subscription represents an Azure subscription configuration
@@ -76,6 +91,14 @@ func ReadTGSConfig() (*TGSConfig, error) {
 	var config TGSConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse TGS config: %w", err)
+	}
+
+	// Set default naming configuration if not provided
+	if config.Naming.Format == "" {
+		config.Naming.Format = "${project}-${region}${env}-${type}"
+	}
+	if config.Naming.DefaultSeparator == "" {
+		config.Naming.DefaultSeparator = "-"
 	}
 
 	return &config, nil

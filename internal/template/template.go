@@ -12,6 +12,40 @@ import (
 
 // TGSYamlTemplate is the default template for tgs.yaml
 const TGSYamlTemplate = `name: projectA  # Your project name
+
+# Resource naming configuration
+naming:
+  # Default format for all resources
+  # Available variables:
+  # ${project} - Project name
+  # ${region} - Region prefix
+  # ${env} - Environment prefix
+  # ${type} - Resource type prefix
+  # ${app} - Application name (if applicable)
+  format: "${project}-${region}${env}-${type}"
+  separator: "-"  # Default separator between name parts
+  
+  # Resource type prefixes
+  resource_prefixes:
+    appservice: "app"
+    serviceplan: "asp"
+    rediscache: "redis"
+    keyvault: "kv"
+    sqlserver: "sql"
+    storage: "st"
+    cosmosdb: "cosmos"
+    servicebus: "sb"
+    eventhub: "eh"
+    functionapp: "func"
+    
+  # Optional: Custom formats for specific components
+  component_formats:
+    keyvault:
+      format: "${project}-${type}-${env}"  # Custom format for Key Vault
+    storage:
+      format: "${project}${type}${env}"    # Custom format for Storage Account
+      separator: ""                        # No separator for Storage Account names
+
 subscriptions:
   nonprod:
     remotestate:

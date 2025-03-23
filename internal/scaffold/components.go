@@ -245,3 +245,71 @@ dependency "%s" {
 
 	return strings.Join(blocks, "\n")
 }
+
+func generateComponentFile(infraPath string, component *config.Component, stackName string) error {
+	// Read the template file
+	templatePath := filepath.Join(infraPath, "_components", stackName, fmt.Sprintf("%s.tf", component.Source))
+	template, err := os.ReadFile(templatePath)
+	if err != nil {
+		return fmt.Errorf("failed to read template file: %w", err)
+	}
+
+	// Get naming configuration from TGS config
+	tgsConfig, err := ReadTGSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load TGS config: %w", err)
+	}
+	namingConfig := tgsConfig.Naming
+
+	// Get resource prefix for this component type
+	resourcePrefix := namingConfig.ResourcePrefixes[component.Source] // Using component.Source as the type
+	if resourcePrefix == "" {
+		resourcePrefix = component.Source // Fallback to component source if no prefix defined
+	}
+
+	// Get format and separator for this component
+	format := namingConfig.Format
+	if componentFormat, exists := namingConfig.ComponentFormats[component.Source]; exists {
+		if componentFormat.Format != "" {
+			format = componentFormat.Format
+		}
+	}
+
+	// Create locals block for naming
+	locals := fmt.Sprintf(`locals {
+  project_name = var.project_name
+  region_prefix = var.region_prefix
+  environment_prefix = var.environment_prefix
+  resource_type = "%s"
+  
+  // Resource naming using configured format
+  resource_name = replace(
+    replace(
+      replace(
+        replace(
+          replace(
+            "%s",
+            "${project}", local.project_name
+          ),
+          "${region}", local.region_prefix
+        ),
+        "${env}", local.environment_prefix
+      ),
+      "${type}", local.resource_type
+    ),
+    "${app}", try(var.app_name, "")
+  )
+}`, resourcePrefix, format)
+
+	// Update template with new locals block
+	content := string(template)
+	content = strings.Replace(content, "locals {", locals, 1)
+
+	// Write the updated content back to the file
+	err = os.WriteFile(templatePath, []byte(content), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write component file: %w", err)
+	}
+
+	return nil
+}
