@@ -12,8 +12,6 @@ import (
 )
 
 func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
-	logger.Info("Generating components")
-
 	// Initialize template renderer
 	renderer, err := templates.NewRenderer()
 	if err != nil {
@@ -40,8 +38,6 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 		if validatedComponents[compName] {
 			continue
 		}
-
-		logger.Info("Generating component: %s", compName)
 
 		// Create component directory
 		componentPath := filepath.Join(stackComponentsDir, compName)

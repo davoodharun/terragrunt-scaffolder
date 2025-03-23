@@ -130,6 +130,7 @@ func Generate() error {
 	if errors := validate.ValidateTGSConfig(tgsConfig); len(errors) > 0 {
 		return fmt.Errorf("TGS config validation failed: %v", errors[0])
 	}
+	logger.Success("TGS configuration validation passed")
 
 	// Track processed stacks to avoid duplicate validation
 	processedStacks := make(map[string]bool)
@@ -157,18 +158,7 @@ func Generate() error {
 			if errors := validate.ValidateStack(mainConfig); len(errors) > 0 {
 				return fmt.Errorf("stack '%s' validation failed: %v", stackName, errors[0])
 			}
-		}
-	}
-
-	// Track existing subscriptions
-	existingSubs := make(map[string]bool)
-
-	// Get existing subscriptions (excluding special directories)
-	if entries, err := os.ReadDir(infraPath); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() && !strings.HasPrefix(entry.Name(), "_") && !strings.HasPrefix(entry.Name(), ".") && entry.Name() != "config" && entry.Name() != "diagrams" {
-				existingSubs[entry.Name()] = true
-			}
+			logger.Success("Stack '%s' validation passed", stackName)
 		}
 	}
 
@@ -176,13 +166,13 @@ func Generate() error {
 	if err := os.MkdirAll(infraPath, 0755); err != nil {
 		return fmt.Errorf("failed to create infrastructure directory: %w", err)
 	}
-
 	logger.Success("Infrastructure folder created")
 
 	// Generate root.hcl
 	if err := generateRootHCL(tgsConfig, infraPath); err != nil {
 		return fmt.Errorf("failed to generate root.hcl: %w", err)
 	}
+	logger.Success("Generated root.hcl")
 
 	// Generate environment config files
 	if err := generateEnvironmentConfigs(tgsConfig, infraPath); err != nil {
@@ -220,8 +210,6 @@ func Generate() error {
 	if err := os.MkdirAll(componentsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create components directory: %w", err)
 	}
-
-	logger.Success("Components created")
 
 	// Generate components for each stack
 	for stackName, components := range stackComponents {
@@ -264,6 +252,7 @@ func Generate() error {
 			}
 		}
 	}
+	logger.Success("Generated architecture scaffolding")
 
 	return nil
 }

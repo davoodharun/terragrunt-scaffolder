@@ -141,8 +141,6 @@ locals {
 }
 
 func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) error {
-	logger.Info("Generating environment configuration files")
-
 	// Create config directory
 	configDir := filepath.Join(infraPath, "config")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -187,7 +185,7 @@ locals {
 		return fmt.Errorf("failed to create global config file: %w", err)
 	}
 
-	logger.Info("Generated global config file: %s", globalPath)
+	logger.Success("Generated environment configuration files")
 
 	// Track unique stacks to create their directories
 	uniqueStacks := make(map[string]bool)

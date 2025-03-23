@@ -6,23 +6,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-
-	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 )
 
 // Move SchemaCache and all provider-related functions here
 // (fetchProviderSchema, initSchemaCache, cleanupSchemaCache)
 
 func fetchProviderSchema(provider, version, resource string) (*ProviderSchema, error) {
-	logger.Info("Fetching provider schema for %s version %s", provider, version)
-
 	cache, err := initSchemaCache()
 	if err != nil {
 		return nil, err
 	}
 
 	if cache.Schema != nil {
-		logger.Info("Using cached provider schema")
 		return cache.Schema, nil
 	}
 
@@ -46,14 +41,12 @@ provider "azurerm" {
 		return nil, fmt.Errorf("failed to write provider.tf: %w", err)
 	}
 
-	logger.Info("Running terraform init in %s", cache.CachePath)
 	cmd := exec.Command("terraform", "init")
 	cmd.Dir = cache.CachePath
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("terraform init failed: %s: %w", string(out), err)
 	}
 
-	logger.Info("Fetching provider schema")
 	cmd = exec.Command("terraform", "providers", "schema", "-json")
 	cmd.Dir = cache.CachePath
 	out, err := cmd.Output()

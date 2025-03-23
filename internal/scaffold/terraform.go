@@ -18,8 +18,6 @@ func generateTerraformFiles(compPath string, comp config.Component) error {
 		return fmt.Errorf("no provider specified for component")
 	}
 
-	logger.Info("Generating Terraform files in: %s", compPath)
-
 	// Fetch provider schema from Terraform Registry
 	schema, err := fetchProviderSchema(comp.Provider, comp.Version, comp.Source)
 	if err != nil {
@@ -53,7 +51,6 @@ output "name" {
 	}
 
 	mainPath := filepath.Join(compPath, "main.tf")
-	logger.Info("Creating main.tf at: %s", mainPath)
 	if err := createFile(mainPath, mainContent); err != nil {
 		return fmt.Errorf("failed to create main.tf: %w", err)
 	}
@@ -87,7 +84,6 @@ variable "tags" {
 	}
 
 	varsPath := filepath.Join(compPath, "variables.tf")
-	logger.Info("Creating variables.tf at: %s", varsPath)
 	if err := createFile(varsPath, varsContent); err != nil {
 		return fmt.Errorf("failed to create variables.tf: %w", err)
 	}
@@ -95,7 +91,6 @@ variable "tags" {
 	// Generate provider.tf
 	providerContent := generateProviderTF(comp)
 	providerPath := filepath.Join(compPath, "provider.tf")
-	logger.Info("Creating provider.tf at: %s", providerPath)
 	if err := createFile(providerPath, providerContent); err != nil {
 		return fmt.Errorf("failed to create provider.tf: %w", err)
 	}
@@ -106,8 +101,6 @@ variable "tags" {
 		filePath := filepath.Join(compPath, file)
 		if _, err := os.Stat(filePath); err != nil {
 			return fmt.Errorf("failed to verify required file %s: %w", file, err)
-		} else {
-			logger.Info("Verified file exists: %s", filePath)
 		}
 	}
 
