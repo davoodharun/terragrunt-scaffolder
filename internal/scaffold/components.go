@@ -30,10 +30,11 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 
 	// Generate component files
 	for compName, comp := range mainConfig.Stack.Components {
-		// Skip components without a provider
-		if comp.Provider == "" {
+		if validatedComponents[compName] {
 			continue
 		}
+
+		logger.Info("Generating component: %s", compName)
 
 		// Create component directory
 		componentPath := filepath.Join(stackComponentsDir, compName)
@@ -46,19 +47,11 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 			return fmt.Errorf("failed to generate terraform files: %w", err)
 		}
 
-		// Generate dependency blocks
+		// Build dependency blocks
 		var dependencyBlocks strings.Builder
 		if len(comp.Deps) > 0 {
-			for _, dep := range comp.Deps {
-				dependencyBlocks.WriteString(fmt.Sprintf(`
-dependency "%s" {
-  config_path = "../%s"
-
-  mock_outputs = {
-    id = "mock-%s-id"
-  }
-}`, dep, dep, dep))
-			}
+			deps := generateDependencyBlocks(comp.Deps, infraPath)
+			dependencyBlocks.WriteString(deps)
 		}
 
 		// Generate component.hcl
@@ -142,7 +135,7 @@ inputs = {
 		}
 
 		// Validate component variables against environment config
-		envConfigPath := filepath.Join(infraPath, "config", "dev.hcl") // Use dev.hcl as base for validation
+		envConfigPath := filepath.Join(infraPath, "config", mainConfig.Stack.Name, "dev.hcl") // Use dev.hcl as base for validation
 		if err := ValidateComponentVariables(componentPath, envConfigPath); err != nil {
 			return fmt.Errorf("component variables validation failed for %s: %w", compName, err)
 		}

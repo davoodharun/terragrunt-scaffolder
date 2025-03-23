@@ -45,6 +45,11 @@ jobs:
       run: |
         # Initialize at root level for all packages
         go mod tidy
+
+    - name: Run Tests
+      run: |
+        # Run all tests with verbose output and fail if any test fails
+        go test -v ./... || exit 1
     
     - name: Build binaries
       run: |
