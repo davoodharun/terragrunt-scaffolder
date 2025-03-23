@@ -1,0 +1,24 @@
+locals {
+  project_name = var.project_name
+  region_prefix = var.region_prefix
+  environment_prefix = var.environment_prefix
+  resource_type = "{{ .ResourceType }}"
+  
+  // Resource naming using configured format
+  resource_name = replace(
+    replace(
+      replace(
+        replace(
+          replace(
+            "{{ .Format }}",
+            "${project}", local.project_name
+          ),
+          "${region}", local.region_prefix
+        ),
+        "${env}", local.environment_prefix
+      ),
+      "${type}", local.resource_type
+    ),
+    "${app}", try(var.app_name, "")
+  )
+} 

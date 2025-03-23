@@ -1,0 +1,66 @@
+locals {
+  # Stack-specific configuration
+  stack_name = "{{ .StackName }}"
+
+  # Load configuration files
+  subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
+  region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
+  environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
+  global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
+  env_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/${local.stack_name}/${local.environment_vars.locals.environment_name}.hcl")
+
+  # Common variables
+  project_name = local.global_config.locals.project_name
+  subscription_name = local.subscription_vars.locals.subscription_name
+  region_name = local.region_vars.locals.region_name
+  region_prefix = local.region_vars.locals.region_prefix
+  environment_name = local.environment_vars.locals.environment_name
+  environment_prefix = local.environment_vars.locals.environment_prefix
+
+  # Component configuration
+  component_name = "{{ .ComponentName }}"
+  provider_source = "{{ .Source }}"
+  provider_version = "{{ .Version }}"
+
+  # Get the directory name as the app name, defaulting to empty string if at component root
+  app_name = try(basename(dirname(get_terragrunt_dir())), basename(get_terragrunt_dir()), "")
+
+  # Resource type abbreviation
+  resource_type = "{{ .ResourceType }}"
+
+  # Resource naming convention with prefixes and resource type
+  name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}-${local.resource_type}"
+  resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
+
+  # Get resource group name from global config
+  resource_group_name = local.global_config.locals.resource_groups[local.environment_name][local.region_name]
+}
+
+terraform {
+  source = "${get_repo_root()}/.infrastructure/_components/${local.stack_name}/${local.component_name}"
+}
+
+{{ .DependencyBlocks }}
+
+inputs = {
+  # Resource identification
+  name = local.resource_name
+  resource_group_name = local.resource_group_name
+  location = local.region_name
+
+  # Tags with context information embedded
+  tags = merge(
+    try(local.global_config.locals.common_tags, {}),
+    {
+      Environment = local.environment_name
+      Application = local.app_name
+      Project = local.project_name
+      Region = local.region_name
+      Stack = local.stack_name
+      Component = local.component_name
+    }
+  )
+
+  # Include environment-specific configurations based on component type
+{{ .EnvConfigInputs }}
+} 

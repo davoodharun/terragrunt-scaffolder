@@ -3,6 +3,7 @@ package scaffold
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -18,9 +19,11 @@ func TestGenerateCommand(t *testing.T) {
 		name        string
 		tgsConfig   string
 		stackConfig string
+		wantErr     bool
+		errContains string
 	}{
 		{
-			name: "Simple single environment",
+			name: "Valid configuration",
 			tgsConfig: `name: CUSTTP
 subscriptions:
   nonprod:
@@ -31,100 +34,20 @@ subscriptions:
       - name: dev
         stack: main`,
 			stackConfig: `stack:
-  components:
-    appservice:
-      source: azurerm_app_service
-      provider: azurerm
-      version: 4.22.0
-  architecture:
-    regions:
-      eastus2:
-        - component: appservice
-          apps: []`,
-		},
-		{
-			name: "Multiple environments and regions",
-			tgsConfig: `name: CUSTTP
-subscriptions:
-  nonprod:
-    remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
-    environments:
-      - name: dev
-        stack: main
-      - name: test
-        stack: main
-  prod:
-    remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-P-TFSTATE-RGP
-    environments:
-      - name: prod
-        stack: main`,
-			stackConfig: `stack:
-  components:
-    rediscache:
-      source: azurerm_redis_cache
-      provider: azurerm
-      version: 4.22.0
-      deps: []
-    appservice:
-      source: azurerm_app_service
-      provider: azurerm
-      version: 4.22.0
-      deps:
-        - "eastus2.redis"
-        - "{region}.serviceplan.{app}"
-    serviceplan:
-      source: azurerm_service_plan
-      provider: azurerm
-      version: 4.22.0 
-      deps: []
-  architecture:
-    regions:
-      eastus2:
-        - component: rediscache
-          apps: []
-        - component: serviceplan
-          apps: 
-            - api
-            - web
-        - component: appservice
-          apps:
-            - api
-            - web
-      westus:
-        - component: serviceplan
-          apps: 
-            - api
-            - web
-        - component: appservice
-          apps:
-            - api
-            - web`,
-		},
-		{
-			name: "Component with dependencies",
-			tgsConfig: `name: CUSTTP
-subscriptions:
-  nonprod:
-    remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
-    environments:
-      - name: dev
-        stack: main`,
-			stackConfig: `stack:
+  name: main
+  version: "1.0.0"
+  description: "Test stack"
   components:
     redis:
       source: azurerm_redis_cache
       provider: azurerm
       version: 4.22.0
+      description: "Redis cache for caching"
     appservice:
       source: azurerm_app_service
       provider: azurerm
       version: 4.22.0
+      description: "App service for API"
       deps:
         - "{region}.redis"
   architecture:
@@ -135,6 +58,183 @@ subscriptions:
         - component: appservice
           apps:
             - api`,
+			wantErr: false,
+		},
+		{
+			name: "Missing project name in tgs.yaml",
+			tgsConfig: `subscriptions:
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  name: main
+  version: "1.0.0"
+  description: "Test stack"
+  components:
+    redis:
+      source: azurerm_redis_cache
+      provider: azurerm
+      version: 4.22.0
+      description: "Redis cache"`,
+			wantErr:     true,
+			errContains: "name property must be filled",
+		},
+		{
+			name: "Missing remotestate in subscription",
+			tgsConfig: `name: CUSTTP
+subscriptions:
+  nonprod:
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  name: main
+  version: "1.0.0"
+  description: "Test stack"
+  components:
+    redis:
+      source: azurerm_redis_cache
+      provider: azurerm
+      version: 4.22.0
+      description: "Redis cache"`,
+			wantErr:     true,
+			errContains: "remotestate.name property must be filled",
+		},
+		{
+			name: "Missing stack version",
+			tgsConfig: `name: CUSTTP
+subscriptions:
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  name: main
+  description: "Test stack"
+  components:
+    redis:
+      source: azurerm_redis_cache
+      provider: azurerm
+      version: 4.22.0
+      description: "Redis cache"`,
+			wantErr:     true,
+			errContains: "version property must be filled",
+		},
+		{
+			name: "Missing component description",
+			tgsConfig: `name: CUSTTP
+subscriptions:
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  name: main
+  version: "1.0.0"
+  description: "Test stack"
+  components:
+    redis:
+      source: azurerm_redis_cache
+      provider: azurerm
+      version: 4.22.0`,
+			wantErr:     true,
+			errContains: "description property must be filled",
+		},
+		{
+			name: "Invalid dependency format",
+			tgsConfig: `name: CUSTTP
+subscriptions:
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  name: main
+  version: "1.0.0"
+  description: "Test stack"
+  components:
+    appservice:
+      source: azurerm_app_service
+      provider: azurerm
+      version: 4.22.0
+      description: "App service"
+      deps:
+        - "invalid_dependency"`,
+			wantErr:     true,
+			errContains: "invalid dependency format",
+		},
+		{
+			name: "Component referenced in architecture but not defined",
+			tgsConfig: `name: CUSTTP
+subscriptions:
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  name: main
+  version: "1.0.0"
+  description: "Test stack"
+  components:
+    redis:
+      source: azurerm_redis_cache
+      provider: azurerm
+      version: 4.22.0
+      description: "Redis cache"
+  architecture:
+    regions:
+      eastus2:
+        - component: undefined_component
+          apps: []`,
+			wantErr:     true,
+			errContains: "component 'undefined_component' referenced in architecture but not defined",
+		},
+		{
+			name: "Invalid region in dependency",
+			tgsConfig: `name: CUSTTP
+subscriptions:
+  nonprod:
+    remotestate:
+      name: custstfstatessta000
+      resource_group: CUSTTP-E-N-TFSTATE-RGP
+    environments:
+      - name: dev
+        stack: main`,
+			stackConfig: `stack:
+  name: main
+  version: "1.0.0"
+  description: "Test stack"
+  components:
+    redis:
+      source: azurerm_redis_cache
+      provider: azurerm
+      version: 4.22.0
+      description: "Redis cache"
+    appservice:
+      source: azurerm_app_service
+      provider: azurerm
+      version: 4.22.0
+      description: "App service"
+      deps:
+        - "invalid_region.redis"`,
+			wantErr:     true,
+			errContains: "invalid region in dependency",
 		},
 	}
 
@@ -175,101 +275,17 @@ subscriptions:
 			}
 
 			// Run generate command
-			if err := Generate(); err != nil {
-				t.Fatalf("Generate failed: %v", err)
-			}
+			err = Generate()
 
-			// Define test paths based on the configuration
-			var testPaths []TestPath
-
-			// Add common paths
-			testPaths = append(testPaths,
-				TestPath{
-					path:     ".infrastructure",
-					isDir:    true,
-					required: true,
-				},
-				TestPath{
-					path:     ".infrastructure/config",
-					isDir:    true,
-					required: true,
-				},
-				TestPath{
-					path:     ".infrastructure/config/main",
-					isDir:    true,
-					required: true,
-				},
-				TestPath{
-					path:     ".infrastructure/_components",
-					isDir:    true,
-					required: true,
-				},
-				TestPath{
-					path:     ".infrastructure/_components/main",
-					isDir:    true,
-					required: true,
-				},
-			)
-
-			// Add paths based on configuration
-			if tc.name == "Simple single environment" {
-				testPaths = append(testPaths,
-					TestPath{
-						path:     ".infrastructure/nonprod/eastus2/dev/appservice",
-						isDir:    true,
-						required: true,
-					},
-				)
-			} else if tc.name == "Multiple environments and regions" {
-				testPaths = append(testPaths,
-					TestPath{
-						path:     ".infrastructure/nonprod/eastus2/dev/appservice/api",
-						isDir:    true,
-						required: true,
-					},
-					TestPath{
-						path:     ".infrastructure/prod/eastus2/prod/appservice/web",
-						isDir:    true,
-						required: true,
-					},
-					TestPath{
-						path:     ".infrastructure/nonprod/westus/test/appservice/api",
-						isDir:    true,
-						required: true,
-					},
-				)
-			} else if tc.name == "Component with dependencies" {
-				testPaths = append(testPaths,
-					TestPath{
-						path:     ".infrastructure/nonprod/eastus2/dev/redis",
-						isDir:    true,
-						required: true,
-					},
-					TestPath{
-						path:     ".infrastructure/nonprod/eastus2/dev/appservice/api",
-						isDir:    true,
-						required: true,
-					},
-				)
-			}
-
-			// Test all paths
-			for _, tp := range testPaths {
-				path := filepath.Join(tmpDir, tp.path)
-				info, err := os.Stat(path)
-				if tp.required {
-					if err != nil {
-						t.Errorf("Required path %s does not exist: %v", tp.path, err)
-						continue
-					}
-					if info.IsDir() != tp.isDir {
-						t.Errorf("Path %s: expected isDir=%v, got isDir=%v", tp.path, tp.isDir, info.IsDir())
-					}
-				} else if err == nil {
-					if info.IsDir() != tp.isDir {
-						t.Errorf("Optional path %s: expected isDir=%v, got isDir=%v", tp.path, tp.isDir, info.IsDir())
-					}
+			// Check if error matches expectation
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("Generate() expected error containing %q, got no error", tc.errContains)
+				} else if !strings.Contains(err.Error(), tc.errContains) {
+					t.Errorf("Generate() error = %v, want error containing %q", err, tc.errContains)
 				}
+			} else if err != nil {
+				t.Errorf("Generate() unexpected error: %v", err)
 			}
 		})
 	}

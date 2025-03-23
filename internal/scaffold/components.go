@@ -8,10 +8,17 @@ import (
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/templates"
 )
 
 func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 	logger.Info("Generating components")
+
+	// Initialize template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to initialize template renderer: %w", err)
+	}
 
 	// Create components directory
 	componentsDir := filepath.Join(infraPath, "_components")
@@ -47,84 +54,31 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 			return fmt.Errorf("failed to generate terraform files: %w", err)
 		}
 
-		// Build dependency blocks
-		var dependencyBlocks strings.Builder
+		// Generate dependency blocks
+		var dependencyBlocks string
 		if len(comp.Deps) > 0 {
 			deps := generateDependencyBlocks(comp.Deps, infraPath)
-			dependencyBlocks.WriteString(deps)
+			dependencyBlocks = deps
 		}
 
-		// Generate component.hcl
-		componentHcl := fmt.Sprintf(`locals {
-  # Stack-specific configuration
-  stack_name = "%s"
+		// Prepare component data
+		componentData := &templates.ComponentData{
+			StackName:        mainConfig.Stack.Name,
+			ComponentName:    compName,
+			Source:           comp.Source,
+			Version:          comp.Version,
+			ResourceType:     getResourceTypeAbbreviation(compName),
+			DependencyBlocks: dependencyBlocks,
+			EnvConfigInputs:  generateEnvConfigInputs(comp),
+		}
 
-  # Load configuration files
-  subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
-  region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
-  environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
-  global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
-  env_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/${local.stack_name}/${local.environment_vars.locals.environment_name}.hcl")
+		// Render component.hcl template
+		componentHcl, err := renderer.RenderTemplate("components/component.hcl.tmpl", componentData)
+		if err != nil {
+			return fmt.Errorf("failed to render component.hcl template: %w", err)
+		}
 
-  # Common variables
-  project_name = local.global_config.locals.project_name
-  subscription_name = local.subscription_vars.locals.subscription_name
-  region_name = local.region_vars.locals.region_name
-  region_prefix = local.region_vars.locals.region_prefix
-  environment_name = local.environment_vars.locals.environment_name
-  environment_prefix = local.environment_vars.locals.environment_prefix
-
-  # Component configuration
-  component_name = "%s"
-  provider_source = "%s"
-  provider_version = "%s"
-
-  # Get the directory name as the app name, defaulting to empty string if at component root
-  app_name = try(basename(dirname(get_terragrunt_dir())), basename(get_terragrunt_dir()), "")
-
-  # Resource type abbreviation
-  resource_type = "%s"
-
-  # Resource naming convention with prefixes and resource type
-  name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}-${local.resource_type}"
-  resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
-
-  # Get resource group name from global config
-  resource_group_name = local.global_config.locals.resource_groups[local.environment_name][local.region_name]
-}
-
-terraform {
-  source = "${get_repo_root()}/.infrastructure/_components/${local.stack_name}/${local.component_name}"
-}
-
-%s
-
-inputs = {
-  # Resource identification
-  name = local.resource_name
-  resource_group_name = local.resource_group_name
-  location = local.region_name
-
-  # Tags with context information embedded
-  tags = merge(
-    try(local.global_config.locals.common_tags, {}),
-    {
-      Environment = local.environment_name
-      Application = local.app_name
-      Project = local.project_name
-      Region = local.region_name
-      Stack = local.stack_name
-      Component = local.component_name
-    }
-  )
-
-  # Include environment-specific configurations based on component type
-%s
-}`, mainConfig.Stack.Name, compName, comp.Source, comp.Version,
-			getResourceTypeAbbreviation(compName),
-			dependencyBlocks.String(),
-			generateEnvConfigInputs(comp))
-
+		// Write component.hcl file
 		if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
 			return fmt.Errorf("failed to create component.hcl: %w", err)
 		}
@@ -197,6 +151,13 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 		return ""
 	}
 
+	// Initialize template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		logger.Warning("Failed to initialize template renderer: %v", err)
+		return ""
+	}
+
 	var blocks []string
 	for _, dep := range deps {
 		parts := strings.Split(dep, ".")
@@ -236,10 +197,16 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 			depName = fmt.Sprintf("%s_%s", component, app)
 		}
 
-		block := fmt.Sprintf(`
-dependency "%s" {
-  config_path = "%s"
-}`, depName, configPath)
+		// Render dependency template
+		dependencyData := &templates.DependencyData{
+			Name:       depName,
+			ConfigPath: configPath,
+		}
+		block, err := renderer.RenderTemplate("components/dependency.hcl.tmpl", dependencyData)
+		if err != nil {
+			logger.Warning("Failed to render dependency template: %v", err)
+			continue
+		}
 		blocks = append(blocks, block)
 	}
 
@@ -261,13 +228,19 @@ func generateComponentFile(infraPath string, component *config.Component, stackN
 	}
 	namingConfig := tgsConfig.Naming
 
-	// Get resource prefix for this component type
-	resourcePrefix := namingConfig.ResourcePrefixes[component.Source] // Using component.Source as the type
-	if resourcePrefix == "" {
-		resourcePrefix = component.Source // Fallback to component source if no prefix defined
+	// Initialize template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to initialize template renderer: %w", err)
 	}
 
-	// Get format and separator for this component
+	// Get resource prefix for this component type
+	resourcePrefix := namingConfig.ResourcePrefixes[component.Source]
+	if resourcePrefix == "" {
+		resourcePrefix = component.Source
+	}
+
+	// Get format for this component
 	format := namingConfig.Format
 	if componentFormat, exists := namingConfig.ComponentFormats[component.Source]; exists {
 		if componentFormat.Format != "" {
@@ -275,31 +248,15 @@ func generateComponentFile(infraPath string, component *config.Component, stackN
 		}
 	}
 
-	// Create locals block for naming
-	locals := fmt.Sprintf(`locals {
-  project_name = var.project_name
-  region_prefix = var.region_prefix
-  environment_prefix = var.environment_prefix
-  resource_type = "%s"
-  
-  // Resource naming using configured format
-  resource_name = replace(
-    replace(
-      replace(
-        replace(
-          replace(
-            "%s",
-            "${project}", local.project_name
-          ),
-          "${region}", local.region_prefix
-        ),
-        "${env}", local.environment_prefix
-      ),
-      "${type}", local.resource_type
-    ),
-    "${app}", try(var.app_name, "")
-  )
-}`, resourcePrefix, format)
+	// Render resource naming template
+	namingData := &templates.ResourceNamingData{
+		ResourceType: resourcePrefix,
+		Format:       format,
+	}
+	locals, err := renderer.RenderTemplate("components/resource_naming.hcl.tmpl", namingData)
+	if err != nil {
+		return fmt.Errorf("failed to render resource naming template: %w", err)
+	}
 
 	// Update template with new locals block
 	content := string(template)

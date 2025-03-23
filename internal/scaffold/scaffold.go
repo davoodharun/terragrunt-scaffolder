@@ -8,6 +8,7 @@ import (
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/validate"
 	"gopkg.in/yaml.v3"
 )
 
@@ -123,6 +124,40 @@ func Generate() error {
 	tgsConfig, err := ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
+	}
+
+	// Validate TGS config
+	if errors := validate.ValidateTGSConfig(tgsConfig); len(errors) > 0 {
+		return fmt.Errorf("TGS config validation failed: %v", errors[0])
+	}
+
+	// Track processed stacks to avoid duplicate validation
+	processedStacks := make(map[string]bool)
+
+	// Validate all stacks referenced in environments
+	for _, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
+			}
+
+			// Skip if we've already validated this stack
+			if processedStacks[stackName] {
+				continue
+			}
+			processedStacks[stackName] = true
+
+			// Read and validate the stack
+			mainConfig, err := readMainConfig(stackName)
+			if err != nil {
+				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+			}
+
+			if errors := validate.ValidateStack(mainConfig); len(errors) > 0 {
+				return fmt.Errorf("stack '%s' validation failed: %v", stackName, errors[0])
+			}
+		}
 	}
 
 	// Track existing subscriptions
