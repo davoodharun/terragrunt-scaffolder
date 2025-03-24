@@ -34,7 +34,7 @@ For a detailed understanding of how the tool works:
    # Download the latest release from GitHub
    # For Windows (PowerShell):
    Invoke-WebRequest -Uri "https://github.com/davoodharun/terragrunt-scaffolder/releases/latest/download/tgs-windows-amd64.exe" -OutFile "tgs.exe"
-   Move-Item tgs.exe $env:LOCALAPPDATA\Microsoft\WindowsApps
+   Move-Item tgs.exe $env:LOCALAPPDATA\Microsoft\WindowsApps -Force
 
    # For macOS/Linux:
    curl -L https://github.com/davoodharun/terragrunt-scaffolder/releases/latest/download/tgs-linux-amd64 -o tgs
