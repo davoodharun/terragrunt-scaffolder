@@ -5,12 +5,27 @@
 A tool to generate and manage Terragrunt infrastructure configurations for Azure resources.
 
 ## Table of Contents
+- [Overview](#overview)
 - [Quick Start](#quick-start)
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration Guide](#configuration-guide)
+- [Prerequisites](#prerequisites)
+- [Provider Setup](#provider-setup)
+  - [Azure Provider Configuration](#azure-provider-configuration)
+  - [Provider Version Requirements](#provider-version-requirements)
 - [Directory Structure](#directory-structure)
+- [Configuration Files](#configuration-files)
+  - [tgs.yaml](#tgsyaml)
+  - [main.yaml (Stack Configuration)](#mainyaml-stack-configuration)
+- [Resource Naming](#resource-naming)
+  - [Default Naming Format](#default-naming-format)
+  - [Configuring Naming](#configuring-naming)
+  - [Available Variables](#available-variables)
+  - [Resource Type Prefixes](#resource-type-prefixes)
+  - [Component-Specific Formats](#component-specific-formats)
+  - [Examples](#examples)
+- [Dependency Notation](#dependency-notation)
+  - [Special Placeholders](#special-placeholders)
+  - [Examples](#examples-1)
+  - [Dependency Resolution](#dependency-resolution)
 - [Development](#development)
 - [Testing](#testing)
 - [Contributing](#contributing)
@@ -401,6 +416,118 @@ stack:
             - web
 ```
 
+## Resource Naming
+
+The tool enforces consistent naming conventions for Azure resources. Resource names are constructed using the following format:
+
+```
+{project_name}-{region_prefix}{environment_prefix}-{app_name}
+```
+
+### Default Naming Format
+
+By default, the tool uses the following naming pattern:
+- `project_name`: From your `tgs.yaml` configuration
+- `region_prefix`: First 4 characters of the region (e.g., "east" for "eastus2")
+- `environment_prefix`: First letter of the environment (e.g., "d" for "dev")
+- `app_name`: Name of the application (if applicable)
+
+Example:
+```
+CUSTTP-eastd-api    # For an API app in eastus2 dev environment
+CUSTTP-westp-web    # For a web app in westus prod environment
+```
+
+### Configuring Naming
+
+You can customize the naming convention in your `tgs.yaml` file:
+
+```yaml
+name: CUSTTP
+naming:
+  format: "{project}-{region}{env}-{app}"  # Custom format string
+  region_prefix_length: 4                  # Number of characters to use from region name
+  environment_prefix_length: 1             # Number of characters to use from environment name
+  resource_types:                          # Resource-specific naming overrides
+    azurerm_app_service:
+      format: "{project}-{region}{env}-{app}-app"  # Custom format for App Service
+    azurerm_storage_account:
+      format: "{project}{region}{env}{app}st"      # Custom format for Storage Account
+```
+
+### Available Variables
+
+The following variables can be used in naming formats:
+- `{project}`: Project name from configuration
+- `{region}`: Region prefix (truncated based on `region_prefix_length`)
+- `{env}`: Environment prefix (truncated based on `environment_prefix_length`)
+- `{app}`: Application name (if applicable)
+- `{component}`: Component name
+- `{resource_type}`: Azure resource type
+
+### Resource Type Prefixes
+
+Some Azure resources have specific naming requirements. The tool automatically handles these by adding appropriate prefixes:
+
+- Storage Accounts: Lowercase alphanumeric only
+- Key Vaults: Lowercase alphanumeric and hyphens only
+- App Services: Lowercase alphanumeric and hyphens only
+- SQL Databases: Lowercase alphanumeric and hyphens only
+
+### Component-Specific Formats
+
+You can override the naming format for specific components in your stack configuration:
+
+```yaml
+stack:
+  components:
+    appservice:
+      source: azurerm_app_service
+      naming:
+        format: "{project}-{region}{env}-{app}-webapp"
+    storage:
+      source: azurerm_storage_account
+      naming:
+        format: "{project}{region}{env}{app}st"
+```
+
+### Examples
+
+1. **Default Naming**:
+   ```yaml
+   name: CUSTTP
+   ```
+   Results in: `CUSTTP-eastd-api`
+
+2. **Custom Format**:
+   ```yaml
+   name: CUSTTP
+   naming:
+     format: "{project}-{region}{env}-{app}-{component}"
+   ```
+   Results in: `CUSTTP-eastd-api-appservice`
+
+3. **Resource-Specific Format**:
+   ```yaml
+   name: CUSTTP
+   naming:
+     resource_types:
+       azurerm_storage_account:
+         format: "{project}{region}{env}{app}st"
+   ```
+   Results in: `CUSTTPeastdapist`
+
+4. **Component-Specific Format**:
+   ```yaml
+   stack:
+     components:
+       appservice:
+         source: azurerm_app_service
+         naming:
+           format: "{project}-{region}{env}-{app}-webapp"
+   ```
+   Results in: `CUSTTP-eastd-api-webapp`
+
 ## Dependency Notation
 
 The `deps` field in the component configuration uses a special notation to define dependencies between components. This notation follows the format:
@@ -469,3 +596,207 @@ Resources are named using the following convention:
 ```
 {project_name}-{region_prefix}{environment_prefix}-{app_name}
 ```
+
+## Development
+
+The project includes a comprehensive test suite to ensure reliability and correctness. Here's how to run and work with the tests:
+
+### Running Tests
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with verbose output
+go test ./... -v
+
+# Run tests for a specific package
+go test ./internal/scaffold -v
+
+# Run a specific test
+go test ./internal/scaffold -v -run TestGenerateCommand
+```
+
+### Test Structure
+
+The test suite is organized as follows:
+
+```
+.
+├── internal/
+│   ├── scaffold/
+│   │   ├── scaffold_test.go    # Main scaffold package tests
+│   │   ├── validate_test.go    # Validation logic tests
+│   │   ├── environment_test.go # Environment generation tests
+│   │   └── components_test.go  # Component generation tests
+│   └── config/
+│       └── config_test.go      # Configuration parsing tests
+└── cmd/
+    └── tgs/
+        └── main_test.go        # CLI command tests
+```
+
+### Test Categories
+
+1. **Unit Tests**
+   - Test individual functions and components in isolation
+   - Located in `internal/*/test.go` files
+   - Focus on edge cases and error conditions
+
+2. **Integration Tests**
+   - Test the interaction between different components
+   - Located in `internal/scaffold/scaffold_test.go`
+   - Verify the complete generation process
+
+3. **CLI Tests**
+   - Test command-line interface functionality
+   - Located in `cmd/tgs/main_test.go`
+   - Verify command execution and output
+
+### Writing Tests
+
+When adding new features or fixing bugs, follow these testing guidelines:
+
+1. **Test File Location**
+   - Place test files next to the source files they test
+   - Use the `_test.go` suffix
+   - Follow the same package structure as the source
+
+2. **Test Naming**
+   - Use descriptive test names that explain the scenario
+   - Follow the pattern: `Test{FunctionName}_{Scenario}`
+   - Example: `TestValidateConfig_ValidConfiguration`
+
+3. **Test Structure**
+   ```go
+   func TestFunctionName_Scenario(t *testing.T) {
+       // Arrange
+       // Set up test data and conditions
+
+       // Act
+       // Execute the function being tested
+
+       // Assert
+       // Verify the results
+   }
+   ```
+
+4. **Table-Driven Tests**
+   - Use table-driven tests for testing multiple scenarios
+   - Example:
+     ```go
+     func TestValidateConfig(t *testing.T) {
+         tests := []struct {
+             name    string
+             config  *config.MainConfig
+             wantErr bool
+         }{
+             {
+                 name:    "valid configuration",
+                 config:  createValidConfig(),
+                 wantErr: false,
+             },
+             {
+                 name:    "missing project name",
+                 config:  createInvalidConfig(),
+                 wantErr: true,
+             },
+         }
+
+         for _, tt := range tests {
+             t.Run(tt.name, func(t *testing.T) {
+                 err := validateConfig(tt.config)
+                 if (err != nil) != tt.wantErr {
+                     t.Errorf("validateConfig() error = %v, wantErr %v", err, tt.wantErr)
+                 }
+             })
+         }
+     }
+     ```
+
+### Test Coverage
+
+To generate and view test coverage:
+
+```bash
+# Generate coverage report
+go test ./... -coverprofile=coverage.out
+
+# View coverage in browser
+go tool cover -html=coverage.out
+
+# View coverage in terminal
+go tool cover -func=coverage.out
+```
+
+### Continuous Integration
+
+Tests are automatically run in the CI pipeline for:
+- Pull requests
+- Merges to main branch
+- Release tags
+
+The CI pipeline ensures:
+- All tests pass
+- Code coverage meets minimum requirements
+- No linting errors
+- No security vulnerabilities
+
+### Debugging Tests
+
+To debug tests:
+
+1. **Using Delve**
+   ```bash
+   # Install Delve
+   go install github.com/go-delve/delve/cmd/dlv@latest
+
+   # Run tests with Delve
+   dlv test ./internal/scaffold -v -run TestGenerateCommand
+   ```
+
+2. **Using VS Code**
+   - Set breakpoints in test files
+   - Use the "Debug Test" option in the Testing sidebar
+   - Use the debug console to inspect variables
+
+### Best Practices
+
+1. **Test Independence**
+   - Each test should be independent
+   - Don't rely on test execution order
+   - Clean up any resources created during tests
+
+2. **Meaningful Assertions**
+   - Test specific outcomes, not implementation details
+   - Use descriptive error messages
+   - Include relevant context in failure messages
+
+3. **Performance**
+   - Keep tests fast and efficient
+   - Use appropriate test helpers and mocks
+   - Avoid unnecessary setup/teardown
+
+4. **Maintainability**
+   - Keep test code clean and well-organized
+   - Use helper functions for common test setup
+   - Document complex test scenarios
+
+## Testing
+
+The project includes a comprehensive test suite to ensure reliability and correctness. For detailed information about testing, including:
+- Running tests
+- Test structure and categories
+- Writing tests
+- Test coverage
+- Continuous integration
+- Debugging tests
+- Best practices
+
+See the [Testing Guide](TESTING.md).
+
+## Contributing
+
+Contributions are welcome! If you find a bug or have a feature request, please open an issue or submit a pull request.
+
+For major changes, please open an issue for discussion before starting the work.
