@@ -262,11 +262,8 @@ The tool uses the following directory structure:
     │   │   ├── dev/            # Environment
     │   │   │   ├── environment.hcl  # Environment-level configuration
     │   │   │   ├── appservice/ # Component
-    │   │   │   │   ├── terragrunt.hcl  # App-specific configuration
     │   │   │   │   ├── api/    # App
-    │   │   │   │   │   └── terragrunt.hcl  # App-specific configuration
     │   │   │   │   └── web/    # App
-    │   │   │   │       └── terragrunt.hcl  # App-specific configuration
     │   │   │   └── ...         # Other components
     │   │   └── test/           # Environment
     │   │       ├── environment.hcl  # Environment-level configuration

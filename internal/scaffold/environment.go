@@ -94,26 +94,34 @@ func generateEnvironment(subscription, region string, envName string, components
 			for _, app := range comp.Apps {
 				appPath := filepath.Join(compPath, app)
 				if err := os.MkdirAll(appPath, 0755); err != nil {
-					return fmt.Errorf("failed to create app directory: %w", err)
+					return fmt.Errorf("failed to create app directory %s: %w", appPath, err)
 				}
 
-				// Create app-specific terragrunt.hcl with stack name in the path
 				terragruntContent := fmt.Sprintf(`include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
 include "component" {
   path = "${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl"
-}
-
-locals {
-  app_name = "%s"
-  component_vars = read_terragrunt_config("${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl")
-  env_vars = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/${local.component_vars.locals.stack_name}/${local.environment_name}.hcl")
-}`, stackName, comp.Component, app, stackName, comp.Component)
+}`, stackName, comp.Component)
 
 				if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), terragruntContent); err != nil {
 					return fmt.Errorf("failed to create terragrunt.hcl for app: %w", err)
+				}
+			}
+
+			// Create single terragrunt.hcl for components without apps
+			if len(comp.Apps) == 0 {
+				terragruntContent := fmt.Sprintf(`include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+include "component" {
+  path = "${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl"
+}`, stackName, comp.Component)
+
+				if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), terragruntContent); err != nil {
+					return fmt.Errorf("failed to create terragrunt.hcl for component: %w", err)
 				}
 			}
 		} else {
@@ -211,7 +219,7 @@ locals {
 			}
 
 			// Read the stack configuration to get actual components
-			mainConfig, err := readMainConfig(stackName)
+			mainConfig, err := ReadMainConfig(stackName)
 			if err != nil {
 				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}

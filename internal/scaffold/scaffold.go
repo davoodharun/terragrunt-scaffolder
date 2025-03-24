@@ -66,32 +66,6 @@ func initSchemaCache() (*SchemaCache, error) {
 	return schemaCache, nil
 }
 
-// Add a function to find the Git repository root
-func findGitRepoRoot() (string, error) {
-	// Start with the current working directory
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current directory: %w", err)
-	}
-
-	// Walk up the directory tree looking for .git
-	for {
-		// Check if .git exists in the current directory
-		gitDir := filepath.Join(dir, ".git")
-		if _, err := os.Stat(gitDir); err == nil {
-			return dir, nil // Found the git repo root
-		}
-
-		// Move up one directory
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// We've reached the root of the filesystem without finding .git
-			return "", fmt.Errorf("no .git directory found in any parent directory")
-		}
-		dir = parent
-	}
-}
-
 // Update the function to get the infrastructure path
 func getInfrastructurePath() string {
 	// Get the current working directory
@@ -150,7 +124,7 @@ func Generate() error {
 			processedStacks[stackName] = true
 
 			// Read and validate the stack
-			mainConfig, err := readMainConfig(stackName)
+			mainConfig, err := ReadMainConfig(stackName)
 			if err != nil {
 				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}
@@ -188,7 +162,7 @@ func Generate() error {
 				stackName = env.Stack
 			}
 
-			mainConfig, err := readMainConfig(stackName)
+			mainConfig, err := ReadMainConfig(stackName)
 			if err != nil {
 				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}
@@ -239,7 +213,7 @@ func Generate() error {
 			}
 
 			// Read the stack-specific config
-			mainConfig, err := readMainConfig(stackName)
+			mainConfig, err := ReadMainConfig(stackName)
 			if err != nil {
 				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}
@@ -255,84 +229,6 @@ func Generate() error {
 	logger.Success("Generated architecture scaffolding")
 
 	return nil
-}
-
-func createSubscriptionConfig(subPath, subName string, sub config.Subscription) error {
-	logger.Info("Creating subscription config for %s", subName)
-	subscriptionHCL := fmt.Sprintf(`locals {
-  subscription_name = "%s"
-  remote_state_resource_group = "%s"
-  remote_state_storage_account = "%s"
-}`, subName, sub.RemoteState.ResourceGroup, sub.RemoteState.Name)
-
-	return createFile(filepath.Join(subPath, "subscription.hcl"), subscriptionHCL)
-}
-
-func createRegionConfig(regionPath, region string) error {
-	logger.Info("Creating region config for %s", region)
-
-	// Determine region prefix (single letter)
-	regionPrefix := getRegionPrefix(region)
-
-	regionHCL := fmt.Sprintf(`locals {
-  region_name = "%s"
-  region_prefix = "%s"
-}`, region, regionPrefix)
-
-	return createFile(filepath.Join(regionPath, "region.hcl"), regionHCL)
-}
-
-// Helper function to get a single letter prefix for a region
-func getRegionPrefix(region string) string {
-	regionPrefixMap := map[string]string{
-		"eastus":        "E",
-		"eastus2":       "E2",
-		"westus":        "W",
-		"westus2":       "W2",
-		"centralus":     "C",
-		"northeurope":   "NE",
-		"westeurope":    "WE",
-		"uksouth":       "UKS",
-		"ukwest":        "UKW",
-		"southeastasia": "SEA",
-		"eastasia":      "EA",
-	}
-
-	// Check if we have a predefined prefix
-	if prefix, ok := regionPrefixMap[region]; ok {
-		return prefix
-	}
-
-	// Default to first letter uppercase if not in map
-	if len(region) > 0 {
-		return strings.ToUpper(region[0:1])
-	}
-
-	return "R" // Default fallback
-}
-
-// Helper function to get a single letter prefix for an environment
-func getEnvironmentPrefix(env string) string {
-	envPrefixMap := map[string]string{
-		"dev":   "D",
-		"test":  "T",
-		"stage": "S",
-		"prod":  "P",
-		"qa":    "Q",
-		"uat":   "U",
-	}
-
-	// Check if we have a predefined prefix
-	if prefix, ok := envPrefixMap[env]; ok {
-		return prefix
-	}
-
-	// Default to first letter uppercase if not in map
-	if len(env) > 0 {
-		return strings.ToUpper(env[0:1])
-	}
-
-	return "E" // Default fallback
 }
 
 func cleanupSchemaCache() {
@@ -377,21 +273,20 @@ func ReadTGSConfig() (*config.TGSConfig, error) {
 	return &cfg, nil
 }
 
-// readMainConfig reads the stack configuration from the .tgs/stacks directory
-func readMainConfig(stackName string) (*config.MainConfig, error) {
-	stacksDir := getStacksDir()
-	stackPath := filepath.Join(stacksDir, fmt.Sprintf("%s.yaml", stackName))
+// ReadMainConfig reads the stack configuration from the .tgs/stacks directory
+func ReadMainConfig(stackName string) (*config.MainConfig, error) {
+	stackPath := filepath.Join(".tgs", "stacks", fmt.Sprintf("%s.yaml", stackName))
 	data, err := os.ReadFile(stackPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read stack config file: %w", err)
 	}
 
-	var cfg config.MainConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	var config config.MainConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal stack config: %w", err)
 	}
 
-	return &cfg, nil
+	return &config, nil
 }
 
 func createFile(path string, content string) error {
@@ -442,18 +337,54 @@ func getStacksDir() string {
 	return stacksDir
 }
 
-// ReadMainConfig reads the stack configuration from the .tgs/stacks directory
-func ReadMainConfig(stackName string) (*config.MainConfig, error) {
-	stackPath := filepath.Join(".tgs", "stacks", fmt.Sprintf("%s.yaml", stackName))
-	data, err := os.ReadFile(stackPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read stack config file: %w", err)
+func getRegionPrefix(region string) string {
+	regionPrefixMap := map[string]string{
+		"eastus":        "E",
+		"eastus2":       "E2",
+		"westus":        "W",
+		"westus2":       "W2",
+		"centralus":     "C",
+		"northeurope":   "NE",
+		"westeurope":    "WE",
+		"uksouth":       "UKS",
+		"ukwest":        "UKW",
+		"southeastasia": "SEA",
+		"eastasia":      "EA",
 	}
 
-	var config config.MainConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal stack config: %w", err)
+	// Check if we have a predefined prefix
+	if prefix, ok := regionPrefixMap[region]; ok {
+		return prefix
 	}
 
-	return &config, nil
+	// Default to first letter uppercase if not in map
+	if len(region) > 0 {
+		return strings.ToUpper(region[0:1])
+	}
+
+	return "R" // Default fallback
+}
+
+// Helper function to get a single letter prefix for an environment
+func getEnvironmentPrefix(env string) string {
+	envPrefixMap := map[string]string{
+		"dev":   "D",
+		"test":  "T",
+		"stage": "S",
+		"prod":  "P",
+		"qa":    "Q",
+		"uat":   "U",
+	}
+
+	// Check if we have a predefined prefix
+	if prefix, ok := envPrefixMap[env]; ok {
+		return prefix
+	}
+
+	// Default to first letter uppercase if not in map
+	if len(env) > 0 {
+		return strings.ToUpper(env[0:1])
+	}
+
+	return "E" // Default fallback
 }

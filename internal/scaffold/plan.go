@@ -61,7 +61,7 @@ func Plan() error {
 				}
 
 				// Read the stack configuration
-				mainConfig, err := readMainConfig(stackName)
+				mainConfig, err := ReadMainConfig(stackName)
 				if err != nil {
 					return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 				}
@@ -177,7 +177,7 @@ func Plan() error {
 				}
 
 				// Read the stack configuration
-				mainConfig, err := readMainConfig(stackName)
+				mainConfig, err := ReadMainConfig(stackName)
 				if err != nil {
 					return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 				}
