@@ -1,6 +1,19 @@
-# terragrunt-scaffolder
+# Terragrunt Scaffolder
 
-A tool for scaffolding Terraform and Terragrunt projects with standardized structure and naming conventions.
+[![Release Go Binary](https://github.com/davoodharun/terragrunt-scaffolder/actions/workflows/release.yml/badge.svg)](https://github.com/davoodharun/terragrunt-scaffolder/actions/workflows/release.yml)
+
+A tool to generate and manage Terragrunt infrastructure configurations for Azure resources.
+
+## Table of Contents
+- [Quick Start](#quick-start)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration Guide](#configuration-guide)
+- [Directory Structure](#directory-structure)
+- [Development](#development)
+- [Testing](#testing)
+- [Contributing](#contributing)
 
 ## Overview
 
