@@ -467,6 +467,9 @@ func generateSmartDefault(name string, attr SchemaAttribute) string {
 			if name == "family" {
 				return `default = "C"`
 			}
+			if name == "service_plan_id" {
+				return `default = "" # Required: Set this in environment config`
+			}
 			return `default = ""`
 		case "number":
 			if strings.Contains(name, "capacity") {

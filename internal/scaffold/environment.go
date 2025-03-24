@@ -329,6 +329,8 @@ func getDefaultValueForType(attrType interface{}, name string, env string) strin
 				return `"Standard"`
 			case "os_type":
 				return `"Linux"`
+			case "service_plan_id":
+				return `"" # Required: Set this in environment config`
 			default:
 				return `""`
 			}
