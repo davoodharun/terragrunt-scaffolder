@@ -249,8 +249,8 @@ The tool uses the following directory structure:
 │   ├── tgs.yaml                # Main configuration file
 │   └── stacks/                 # Stack configurations
 │       ├── main.yaml           # Default stack
-│       ├── dev.yaml            # Dev stack
-│       └── prod.yaml           # Prod stack
+│       ├── sandbox.yaml        # Sandbox stack
+│       └── localdev.yaml       # Local development stack
 │
 └── .infrastructure/            # Generated infrastructure code
     ├── config/                 # Global configuration
