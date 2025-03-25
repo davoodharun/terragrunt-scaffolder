@@ -50,6 +50,7 @@ var ValidAzureResourceTypes = map[string]bool{
 	"azurerm_servicebus_namespace":                  true,
 	"azurerm_cosmosdb_account":                      true,
 	"azurerm_cosmosdb_sql_database":                 true,
+	"azurerm_api_management_api":                    true,
 	"azurerm_redis_cache":                           true,
 	"azurerm_key_vault":                             true,
 	"azurerm_storage_account":                       true,
