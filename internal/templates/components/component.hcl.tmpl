@@ -28,8 +28,17 @@ locals {
   # Resource type abbreviation
   resource_type = "{{ .ResourceType }}"
 
-  # Resource naming convention with prefixes and resource type
-  name_prefix = "${local.project_name}-${local.region_prefix}${local.environment_prefix}-${local.resource_type}"
+  # Resource naming convention using the format from config
+  name_format = "{{ .NamingFormat }}"
+  name_parts = [
+    for part in split("-", local.name_format) : 
+    replace(replace(replace(replace(part,
+      "project", local.project_name),
+      "region", local.region_prefix),
+      "env", local.environment_prefix),
+      "type", local.resource_type)
+  ]
+  name_prefix = join("-", local.name_parts)
   resource_name = local.app_name != "" ? "${local.name_prefix}-${local.app_name}" : local.name_prefix
 
   # Get resource group name from global config using stack name

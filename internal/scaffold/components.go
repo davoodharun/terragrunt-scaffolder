@@ -18,6 +18,12 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 		return fmt.Errorf("failed to initialize template renderer: %w", err)
 	}
 
+	// Read TGS config to get naming format
+	tgsConfig, err := config.ReadTGSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to read TGS config: %w", err)
+	}
+
 	// Create components directory
 	componentsDir := filepath.Join(infraPath, "_components")
 	if err := os.MkdirAll(componentsDir, 0755); err != nil {
@@ -66,6 +72,7 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 			ResourceType:     getResourceTypeAbbreviation(compName),
 			DependencyBlocks: dependencyBlocks,
 			EnvConfigInputs:  generateEnvConfigInputs(comp),
+			NamingFormat:     tgsConfig.Naming.Format,
 		}
 
 		// Render component.hcl template

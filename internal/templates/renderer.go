@@ -77,6 +77,7 @@ type ComponentData struct {
 	ResourceType     string
 	DependencyBlocks string
 	EnvConfigInputs  string
+	NamingFormat     string
 }
 
 // ResourceNamingData represents the data needed for resource naming templates
