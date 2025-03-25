@@ -1,0 +1,28 @@
+# Include this in all terragrunt.hcl files
+locals {
+  subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
+  global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
+  environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
+  
+  subscription_name = local.subscription_vars.locals.subscription_name
+  project_name = local.global_config.locals.project_name
+  remote_state_resource_group = local.subscription_vars.locals.remote_state_resource_group
+  remote_state_storage_account = local.subscription_vars.locals.remote_state_storage_account
+  
+  # Infrastructure path relative to repo root
+  infrastructure_path = ".infrastructure"
+}
+
+remote_state {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = local.remote_state_resource_group
+    storage_account_name = local.remote_state_storage_account
+    container_name       = lower(local.project_name)
+    key                  = "${path_relative_to_include()}/terraform.tfstate"
+  }
+  generate = {
+    path      = "backend.tf"
+    if_exists = "overwrite_terragrunt"
+  }
+} 

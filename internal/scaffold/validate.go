@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 	"github.com/hashicorp/hcl/v2/hclparse"
 )
@@ -108,7 +109,7 @@ func validateTGSConfig() error {
 	logger.Info("Validating TGS configuration")
 
 	// Read TGS config
-	tgsConfig, err := ReadTGSConfig()
+	tgsConfig, err := config.ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}

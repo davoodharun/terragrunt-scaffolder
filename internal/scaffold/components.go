@@ -50,18 +50,10 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 			return fmt.Errorf("failed to generate terraform files: %w", err)
 		}
 
-		// Analyze required inputs and their dependencies
-		analyzedDeps, _ := analyzeRequiredInputs(comp)
-
-		// Combine explicit dependencies with analyzed dependencies
-		var allDeps []string
-		allDeps = append(allDeps, comp.Deps...)
-		allDeps = append(allDeps, analyzedDeps...)
-
-		// Generate dependency blocks
+		// Use only explicit dependencies from the stack file
 		var dependencyBlocks string
-		if len(allDeps) > 0 {
-			deps := generateDependencyBlocks(allDeps, infraPath)
+		if len(comp.Deps) > 0 {
+			deps := generateDependencyBlocks(comp.Deps, infraPath)
 			dependencyBlocks = deps
 		}
 
@@ -92,10 +84,38 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 			return fmt.Errorf("component structure validation failed for %s: %w", compName, err)
 		}
 
-		// Validate component variables against environment config
-		envConfigPath := filepath.Join(infraPath, "config", mainConfig.Stack.Name, "dev.hcl") // Use dev.hcl as base for validation
-		if err := ValidateComponentVariables(componentPath, envConfigPath); err != nil {
-			return fmt.Errorf("component variables validation failed for %s: %w", compName, err)
+		// Read TGS config to find valid environments for this stack
+		tgsConfig, err := config.ReadTGSConfig()
+		if err != nil {
+			return fmt.Errorf("failed to read TGS config: %w", err)
+		}
+
+		// Find any environment that uses this stack
+		var envConfigPath string
+		for _, sub := range tgsConfig.Subscriptions {
+			for _, env := range sub.Environments {
+				stackToCheck := "main"
+				if env.Stack != "" {
+					stackToCheck = env.Stack
+				}
+				if stackToCheck == mainConfig.Stack.Name {
+					envConfigPath = filepath.Join(infraPath, "config", mainConfig.Stack.Name, fmt.Sprintf("%s.hcl", env.Name))
+					if _, err := os.Stat(envConfigPath); err == nil {
+						// Found a valid environment config file
+						break
+					}
+				}
+			}
+			if envConfigPath != "" {
+				break
+			}
+		}
+
+		// If we found a valid environment config, validate against it
+		if envConfigPath != "" {
+			if err := ValidateComponentVariables(componentPath, envConfigPath); err != nil {
+				return fmt.Errorf("component variables validation failed for %s: %w", compName, err)
+			}
 		}
 
 		logger.Success("Generated and validated component: %s", compName)
@@ -195,11 +215,11 @@ func generateEnvConfigInputs(comp config.Component) string {
 		if dep, exists := inputDeps["service_plan_id"]; exists {
 			inputs = append(inputs, fmt.Sprintf(`    service_plan_id = dependency.%s.outputs.id`, dep))
 		} else {
-			inputs = append(inputs, `    service_plan_id = try(local.env_vars.locals.serviceplan.id, "") # Required: Set this in environment config`)
+			inputs = append(inputs, `    service_plan_id = try(local.env_config.locals.serviceplan.id, "") # Required: Set this in environment config`)
 		}
 
-		inputs = append(inputs, `    app_settings = try(local.env_vars.locals.appservice.app_settings, {})`,
-			`    site_config = try(local.env_vars.locals.appservice.site_config, {})`)
+		inputs = append(inputs, `    app_settings = try(local.env_config.locals.appservice.app_settings, {})`,
+			`    site_config = try(local.env_config.locals.appservice.site_config, {})`)
 
 		return strings.Join(inputs, "\n")
 	}
@@ -207,8 +227,8 @@ func generateEnvConfigInputs(comp config.Component) string {
 	switch compType {
 	case "service_plan":
 		return `# Service Plan specific settings
-    sku_name = try(local.env_vars.locals.serviceplan.sku_name, "B1")
-    os_type = try(local.env_vars.locals.serviceplan.os_type, "Linux")`
+    sku_name = try(local.env_config.locals.serviceplan.sku_name, "B1")
+    os_type = try(local.env_config.locals.serviceplan.os_type, "Linux")`
 	case "function_app":
 		var inputs []string
 		inputs = append(inputs, `# Function App specific settings`)
@@ -217,10 +237,10 @@ func generateEnvConfigInputs(comp config.Component) string {
 		if dep, exists := inputDeps["service_plan_id"]; exists {
 			inputs = append(inputs, fmt.Sprintf(`    service_plan_id = dependency.%s.outputs.id`, dep))
 		} else {
-			inputs = append(inputs, `    service_plan_id = try(local.env_vars.locals.serviceplan.id, "") # Required: Set this in environment config`)
+			inputs = append(inputs, `    service_plan_id = try(local.env_config.locals.serviceplan.id, "") # Required: Set this in environment config`)
 		}
 
-		inputs = append(inputs, `    app_settings = try(local.env_vars.locals.functionapp.app_settings, {})`)
+		inputs = append(inputs, `    app_settings = try(local.env_config.locals.functionapp.app_settings, {})`)
 		return strings.Join(inputs, "\n")
 	case "sql_database":
 		var inputs []string
@@ -230,33 +250,32 @@ func generateEnvConfigInputs(comp config.Component) string {
 		if dep, exists := inputDeps["server_id"]; exists {
 			inputs = append(inputs, fmt.Sprintf(`    server_id = dependency.%s.outputs.id`, dep))
 		} else {
-			inputs = append(inputs, `    server_id = try(local.env_vars.locals.sql.server_id, "") # Required: Set this in environment config`)
+			inputs = append(inputs, `    server_id = try(local.env_config.locals.sql.server_id, "") # Required: Set this in environment config`)
 		}
 
-		inputs = append(inputs, `    sku_name = try(local.env_vars.locals.sql.sku_name, "Basic")`)
+		inputs = append(inputs, `    sku_name = try(local.env_config.locals.sql.sku_name, "Basic")`)
 		return strings.Join(inputs, "\n")
 	case "redis_cache":
 		return `# Redis Cache specific settings
-    sku_name = try(local.env_vars.locals.redis.sku_name, "Basic")
-    family = try(local.env_vars.locals.redis.family, "C")`
+    sku_name = try(local.env_config.locals.redis.sku_name, "Basic")
+    family = try(local.env_config.locals.redis.family, "C")`
 	case "key_vault":
 		return `# Key Vault specific settings
-    sku_name = try(local.env_vars.locals.keyvault.sku_name, "standard")
-    tenant_id = try(local.env_vars.locals.keyvault.tenant_id, data.azurerm_client_config.current.tenant_id)
-    purge_protection_enabled = try(local.env_vars.locals.keyvault.purge_protection_enabled, false)`
+    sku_name = try(local.env_config.locals.keyvault.sku_name, "standard")
+    purge_protection_enabled = try(local.env_config.locals.keyvault.purge_protection_enabled, false)`
 	case "storage_account":
 		return `# Storage Account specific settings
-    account_tier = try(local.env_vars.locals.storage.account_tier, "Standard")
-    account_replication_type = try(local.env_vars.locals.storage.account_replication_type, "LRS")`
+    account_tier = try(local.env_config.locals.storage.account_tier, "Standard")
+    account_replication_type = try(local.env_config.locals.storage.account_replication_type, "LRS")`
 	case "sql_server":
 		return `# SQL Server specific settings
-    version = try(local.env_vars.locals.sql.version, "12.0")
-    administrator_login = try(local.env_vars.locals.sql.administrator_login, "sqladmin")
-    administrator_login_password = try(local.env_vars.locals.sql.administrator_login_password, "") # Required: Set this in environment config`
+    version = try(local.env_config.locals.sql.version, "12.0")
+    administrator_login = try(local.env_config.locals.sql.administrator_login, "sqladmin")
+    administrator_login_password = try(local.env_config.locals.sql.administrator_login_password, "") # Required: Set this in environment config`
 	case "cosmosdb_account":
 		return `# Cosmos DB specific settings
-    offer_type = try(local.env_vars.locals.cosmos.offer_type, "Standard")
-    consistency_level = try(local.env_vars.locals.cosmos.consistency_level, "Session")`
+    offer_type = try(local.env_config.locals.cosmos.offer_type, "Standard")
+    consistency_level = try(local.env_config.locals.cosmos.consistency_level, "Session")`
 	default:
 		return "# No specific inputs required for this component type"
 	}
@@ -276,6 +295,7 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 	}
 
 	var blocks []string
+	usedNames := make(map[string]bool)
 	for _, dep := range deps {
 		// Handle both explicit dependencies and analyzed dependencies
 		if strings.Contains(dep, ".") {
@@ -316,6 +336,12 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 				depName = fmt.Sprintf("%s_%s", component, app)
 			}
 
+			// Ensure unique dependency name
+			if usedNames[depName] {
+				depName = fmt.Sprintf("%s_%d", depName, len(usedNames)+1)
+			}
+			usedNames[depName] = true
+
 			// Render dependency template
 			dependencyData := &templates.DependencyData{
 				Name:       depName,
@@ -331,8 +357,15 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 			// Handle analyzed dependencies (component name only)
 			configPath := fmt.Sprintf("${get_repo_root()}/.infrastructure/${local.subscription_name}/${local.region_vars.locals.region_name}/${local.environment_vars.locals.environment_name}/%s", dep)
 
+			// Ensure unique dependency name
+			depName := dep
+			if usedNames[depName] {
+				depName = fmt.Sprintf("%s_%d", depName, len(usedNames)+1)
+			}
+			usedNames[depName] = true
+
 			dependencyData := &templates.DependencyData{
-				Name:       dep,
+				Name:       depName,
 				ConfigPath: configPath,
 			}
 			block, err := renderer.RenderTemplate("components/dependency.hcl.tmpl", dependencyData)

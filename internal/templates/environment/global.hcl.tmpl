@@ -1,0 +1,27 @@
+# Global configuration values
+locals {
+  # Project name from tgs.yaml
+  project_name = "{{ .ProjectName }}"
+  
+  # Resource group configuration by stack, environment and region
+  resource_groups = {
+    {{- range $stackName, $stack := .Stacks }}
+    # {{ $stackName }} stack resource groups
+    {{ $stackName }} = {
+      {{- range $envName, $env := $stack.Environments }}
+      {{ $envName }} = {
+        {{- range $regionName, $region := $env.Regions }}
+        {{ $regionName }} = "rg-${local.project_name}{{ if eq $stackName "global-services" }}-global{{ end }}-{{ $region.Prefix }}{{ $env.Prefix }}"
+        {{- end }}
+      }
+      {{- end }}
+    }
+    {{- end }}
+  }
+  
+  # Common tags for all resources
+  common_tags = {
+    Project = local.project_name
+    ManagedBy = "Terragrunt"
+  }
+} 

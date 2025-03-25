@@ -211,19 +211,267 @@ func BuildDependencyChain(components []Component) []Stage {
 	return result
 }
 
-// GeneratePipelineTemplates generates pipeline templates for each environment
+// generateStackTemplate generates a deployment template for a specific stack
+func generateStackTemplate(stackName string, mainConfig *config.MainConfig) error {
+	// Create templates directory if it doesn't exist
+	if err := os.MkdirAll(".azure-pipelines/templates", 0755); err != nil {
+		return fmt.Errorf("failed to create templates directory: %w", err)
+	}
+
+	// Generate the stack template content
+	template := fmt.Sprintf(`# Stack deployment template for %s
+parameters:
+  - name: environment
+    type: string
+  - name: subscription
+    type: string
+  - name: runMode
+    type: string
+    default: plan
+    values:
+      - plan
+      - apply
+      - destroy
+
+stages:
+`, stackName)
+
+	// Group components by region
+	regionComponents := make(map[string][]string)
+	for region, components := range mainConfig.Stack.Architecture.Regions {
+		for _, comp := range components {
+			regionComponents[region] = append(regionComponents[region], comp.Component)
+		}
+	}
+
+	// Add stages for each region's components
+	for region, components := range regionComponents {
+		template += fmt.Sprintf(`  # Region: %s
+`, region)
+		for _, comp := range components {
+			componentConfig := mainConfig.Stack.Components[comp]
+
+			// Get apps for this component in this region
+			var apps []string
+			for _, rc := range mainConfig.Stack.Architecture.Regions[region] {
+				if rc.Component == comp {
+					apps = rc.Apps
+					break
+				}
+			}
+
+			// Helper function to get stage dependencies
+			getDependencies := func(depString string, currentApp string) string {
+				depParts := strings.Split(depString, ".")
+				if len(depParts) < 2 {
+					return ""
+				}
+
+				depRegion := depParts[0]
+				depComp := depParts[1]
+				if depRegion == "{region}" {
+					depRegion = region
+				}
+
+				// Check if the dependency component has apps
+				hasApps := false
+				var depApp string
+				if len(depParts) > 2 {
+					depApp = depParts[2]
+					if depApp == "{app}" {
+						depApp = currentApp
+					}
+					hasApps = true
+				} else {
+					// Check if the component has apps in the architecture
+					for _, rc := range mainConfig.Stack.Architecture.Regions[depRegion] {
+						if rc.Component == depComp && len(rc.Apps) > 0 {
+							hasApps = true
+							depApp = rc.Apps[0] // Use the first app as default
+							break
+						}
+					}
+				}
+
+				if hasApps {
+					return fmt.Sprintf("'%s_%s_%s'", depRegion, depComp, depApp)
+				}
+				return fmt.Sprintf("'%s_%s'", depRegion, depComp)
+			}
+
+			// If component has apps, create a stage for each app
+			if len(apps) > 0 {
+				for _, app := range apps {
+					stageName := fmt.Sprintf("%s_%s_%s", region, comp, app)
+					displayName := fmt.Sprintf("%s/%s/%s", region, comp, app)
+
+					// Add dependencies
+					var deps []string
+					for _, dep := range componentConfig.Deps {
+						if depStage := getDependencies(dep, app); depStage != "" {
+							deps = append(deps, depStage)
+						}
+					}
+
+					template += fmt.Sprintf(`  - stage: '%s'
+    displayName: '%s'
+`, stageName, displayName)
+
+					// Always add dependsOn section
+					if len(deps) > 0 {
+						template += "    dependsOn:\n"
+						for _, dep := range deps {
+							template += fmt.Sprintf("      - %s\n", dep)
+						}
+					} else {
+						template += "    dependsOn: []\n"
+					}
+
+					template += fmt.Sprintf(`    jobs:
+      - job: Deploy
+        displayName: 'Deploy Infrastructure (${{ parameters.runMode }})'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - template: component-deploy.yml
+            parameters:
+              component: '%s'
+              region: '%s'
+              environment: ${{ parameters.environment }}
+              subscription: ${{ parameters.subscription }}
+              runMode: ${{ parameters.runMode }}
+              app: '%s'
+
+`, comp, region, app)
+				}
+			} else {
+				// Create single stage for component without apps
+				stageName := fmt.Sprintf("%s_%s", region, comp)
+				displayName := fmt.Sprintf("%s/%s", region, comp)
+
+				// Add dependencies
+				var deps []string
+				for _, dep := range componentConfig.Deps {
+					if depStage := getDependencies(dep, ""); depStage != "" {
+						deps = append(deps, depStage)
+					}
+				}
+
+				template += fmt.Sprintf(`  - stage: '%s'
+    displayName: '%s'
+`, stageName, displayName)
+
+				// Always add dependsOn section
+				if len(deps) > 0 {
+					template += "    dependsOn:\n"
+					for _, dep := range deps {
+						template += fmt.Sprintf("      - %s\n", dep)
+					}
+				} else {
+					template += "    dependsOn: []\n"
+				}
+
+				template += fmt.Sprintf(`    jobs:
+      - job: Deploy
+        displayName: 'Deploy Infrastructure (${{ parameters.runMode }})'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - template: component-deploy.yml
+            parameters:
+              component: '%s'
+              region: '%s'
+              environment: ${{ parameters.environment }}
+              subscription: ${{ parameters.subscription }}
+              runMode: ${{ parameters.runMode }}
+
+`, comp, region)
+			}
+		}
+	}
+
+	// Write the template file
+	templatePath := filepath.Join(".azure-pipelines/templates", fmt.Sprintf("stack-%s.yml", stackName))
+	if err := os.WriteFile(templatePath, []byte(template), 0644); err != nil {
+		return fmt.Errorf("failed to write stack template: %w", err)
+	}
+
+	return nil
+}
+
+// GeneratePipelineTemplates generates all pipeline templates
 func GeneratePipelineTemplates() error {
-	// Create .azuredevops directory
-	if err := os.MkdirAll(".azuredevops", 0755); err != nil {
-		return fmt.Errorf("failed to create .azuredevops directory: %w", err)
+	// Create .azure-pipelines directory if it doesn't exist
+	if err := os.MkdirAll(".azure-pipelines", 0755); err != nil {
+		return fmt.Errorf("failed to create pipeline directory: %w", err)
 	}
 
-	// Create .azuredevops/scripts directory
-	if err := os.MkdirAll(".azuredevops/scripts", 0755); err != nil {
-		return fmt.Errorf("failed to create .azuredevops/scripts directory: %w", err)
+	// Read TGS config
+	tgsConfig, err := config.ReadTGSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to read TGS config: %w", err)
 	}
 
-	// Create deploy.sh script
+	// Track processed stacks to avoid duplicates
+	processedStacks := make(map[string]bool)
+
+	// Generate stack templates for each unique stack
+	for _, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
+			}
+
+			if !processedStacks[stackName] {
+				mainConfig, err := config.ReadMainConfig(stackName)
+				if err != nil {
+					return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+				}
+
+				if err := generateStackTemplate(stackName, mainConfig); err != nil {
+					return fmt.Errorf("failed to generate stack template for %s: %w", stackName, err)
+				}
+
+				processedStacks[stackName] = true
+			}
+		}
+	}
+
+	// Generate the component deployment template
+	if err := generateDeploymentTemplate(); err != nil {
+		return fmt.Errorf("failed to generate deployment template: %w", err)
+	}
+
+	// Analyze infrastructure to get components by environment
+	envComponents, err := AnalyzeInfrastructure()
+	if err != nil {
+		return fmt.Errorf("failed to analyze infrastructure: %w", err)
+	}
+
+	// Generate pipeline for each environment
+	for envName, components := range envComponents {
+		if err := generateEnvironmentPipeline(envName, components); err != nil {
+			return fmt.Errorf("failed to generate pipeline for environment %s: %w", envName, err)
+		}
+	}
+
+	return nil
+}
+
+// generateDeploymentTemplate generates the deployment template YAML
+func generateDeploymentTemplate() error {
+	// Create templates directory if it doesn't exist
+	if err := os.MkdirAll(".azure-pipelines/templates", 0755); err != nil {
+		return fmt.Errorf("failed to create templates directory: %w", err)
+	}
+
+	// Create scripts directory if it doesn't exist
+	if err := os.MkdirAll(".azure-pipelines/scripts", 0755); err != nil {
+		return fmt.Errorf("failed to create scripts directory: %w", err)
+	}
+
+	// Generate deploy script
 	deployScript := `#!/bin/bash
 set -e
 
@@ -243,8 +491,9 @@ case "$6" in
     terragrunt plan
     ;;
   "apply")
-    terragrunt plan --auto-approve
+    terragrunt plan
     terragrunt apply --auto-approve
+    terragrunt output
     ;;
   "destroy")
     terragrunt destroy --auto-approve
@@ -255,41 +504,19 @@ case "$6" in
     ;;
 esac`
 
-	if err := os.WriteFile(".azuredevops/scripts/deploy.sh", []byte(deployScript), 0755); err != nil {
-		return fmt.Errorf("failed to create deploy.sh script: %w", err)
+	if err := os.WriteFile(".azure-pipelines/scripts/deploy.sh", []byte(deployScript), 0755); err != nil {
+		return fmt.Errorf("failed to create deploy script: %w", err)
 	}
 
-	// Analyze infrastructure
-	envComponents, err := AnalyzeInfrastructure()
-	if err != nil {
-		return fmt.Errorf("failed to analyze infrastructure: %w", err)
-	}
-
-	// Generate deployment template
-	if err := generateDeploymentTemplate(); err != nil {
-		return fmt.Errorf("failed to generate deployment template: %w", err)
-	}
-
-	// Generate pipeline for each environment
-	for envName, components := range envComponents {
-		if err := generateEnvironmentPipeline(envName, components); err != nil {
-			return fmt.Errorf("failed to generate pipeline for environment %s: %w", envName, err)
-		}
-	}
-
-	return nil
-}
-
-// generateDeploymentTemplate generates the deployment template YAML
-func generateDeploymentTemplate() error {
+	// Generate component deployment template
 	template := `parameters:
   - name: component
     type: string
   - name: region
     type: string
-  - name: env
+  - name: environment
     type: string
-  - name: sub
+  - name: subscription
     type: string
   - name: app
     type: string
@@ -302,18 +529,13 @@ func generateDeploymentTemplate() error {
     default: 'v0.69.10'
   - name: runMode
     type: string
-    default: 'apply'
+    default: 'plan'
     values:
       - plan
       - apply
       - destroy
 
 steps:
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: '3.9'
-      addToPath: true
-
   - script: |
       # Install Terraform
       wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
@@ -327,8 +549,8 @@ steps:
     displayName: Install Terraform and Terragrunt
 
   - script: |
-      chmod +x .azuredevops/scripts/deploy.sh
-      .azuredevops/scripts/deploy.sh "${{ parameters.app }}" "${{ parameters.sub }}" "${{ parameters.region }}" "${{ parameters.env }}" "${{ parameters.component }}" "${{ parameters.runMode }}"
+      chmod +x .azure-pipelines/scripts/deploy.sh
+      .azure-pipelines/scripts/deploy.sh "${{ parameters.app }}" "${{ parameters.subscription }}" "${{ parameters.region }}" "${{ parameters.environment }}" "${{ parameters.component }}" "${{ parameters.runMode }}"
     displayName: Deploy Infrastructure
     env:
       ARM_CLIENT_ID: $(ARM_CLIENT_ID)
@@ -337,36 +559,56 @@ steps:
       ARM_TENANT_ID: $(ARM_TENANT_ID)
 `
 
-	return os.WriteFile(".azuredevops/component-deploy.yml", []byte(template), 0644)
+	return os.WriteFile(".azure-pipelines/templates/component-deploy.yml", []byte(template), 0644)
 }
 
-// generateEnvironmentPipeline generates the pipeline YAML for an environment
+// generateEnvironmentPipeline generates a pipeline for a specific environment
 func generateEnvironmentPipeline(envName string, components []Component) error {
-	// Build dependency chain
-	stages := BuildDependencyChain(components)
+	if len(components) == 0 {
+		return nil
+	}
 
-	// Generate pipeline YAML
-	var pipeline strings.Builder
-	pipeline.WriteString(fmt.Sprintf(`parameters:
+	// Get subscription and stack from first component (they should all be the same)
+	sub := components[0].Sub
+
+	// Read TGS config to get stack name
+	tgsConfig, err := config.ReadTGSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to read TGS config: %w", err)
+	}
+
+	// Find stack name for this environment
+	stackName := "main"
+	for _, subscription := range tgsConfig.Subscriptions {
+		for _, env := range subscription.Environments {
+			if env.Name == envName {
+				if env.Stack != "" {
+					stackName = env.Stack
+				}
+				break
+			}
+		}
+	}
+
+	// Create pipeline content
+	pipeline := fmt.Sprintf(`# Pipeline for %s environment
+trigger: none
+pr: none
+
+parameters:
   - name: runMode
-    displayName: Run Mode
     type: string
-    default: 'apply'
+    default: plan
     values:
       - plan
       - apply
       - destroy
 
-trigger:
-  branches:
-    include:
-      - main
-  paths:
-    include:
-      - .infrastructure/**
-      - .azuredevops/**
-
 variables:
+  - name: environment
+    value: '%s'
+  - name: subscription
+    value: '%s'
   - group: terraform-variables
   - name: terraform_version
     value: '1.11.2'
@@ -374,47 +616,18 @@ variables:
     value: 'v0.69.10'
 
 stages:
-`))
+  - template: templates/stack-%s.yml
+    parameters:
+      environment: $(environment)
+      subscription: $(subscription)
+      runMode: ${{ parameters.runMode }}
+`, envName, envName, sub, stackName)
 
-	// Add stages
-	for _, stage := range stages {
-		// Format dependsOn as an array
-		dependsOn := "[]"
-		if len(stage.DependsOn) > 0 {
-			dependsOn = fmt.Sprintf("[%s]", strings.Join(stage.DependsOn, ", "))
-		}
-
-		pipeline.WriteString(fmt.Sprintf(`  - stage: %s
-    displayName: Deploy %s
-    dependsOn: %s
-    jobs:
-      - job: Deploy
-        displayName: Deploy Infrastructure
-        pool:
-          vmImage: ubuntu-latest
-        steps:
-          - template: component-deploy.yml
-            parameters:
-              component: %s
-              region: %s
-              env: %s
-              sub: %s
-              terraform_version: $(terraform_version)
-              terragrunt_version: $(terragrunt_version)
-              runMode: ${{ parameters.runMode }}
-`, stage.Name, stage.Name, dependsOn,
-			stage.Parameters["component"], stage.Parameters["region"],
-			stage.Parameters["env"], stage.Parameters["sub"]))
-
-		if app, ok := stage.Parameters["app"].(string); ok && app != "" {
-			pipeline.WriteString(fmt.Sprintf(`              app: %s
-`, app))
-		}
-
-		pipeline.WriteString("\n")
+	// Write the pipeline file
+	pipelinePath := filepath.Join(".azure-pipelines", fmt.Sprintf("%s-pipeline.yml", envName))
+	if err := os.WriteFile(pipelinePath, []byte(pipeline), 0644); err != nil {
+		return fmt.Errorf("failed to write pipeline file: %w", err)
 	}
 
-	// Write pipeline file
-	filename := fmt.Sprintf(".azuredevops/%s-pipeline.yml", envName)
-	return os.WriteFile(filename, []byte(pipeline.String()), 0644)
+	return nil
 }

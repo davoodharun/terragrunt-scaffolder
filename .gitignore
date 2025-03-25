@@ -6,3 +6,4 @@ tgs.exe
 .tgs/
 .azuredevops/
 .infrastructure/
+.azure-pipelines/

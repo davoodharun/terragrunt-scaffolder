@@ -26,7 +26,7 @@ func Plan() error {
 	logger.Info("Analyzing infrastructure changes...")
 
 	// Read TGS config
-	tgsConfig, err := ReadTGSConfig()
+	tgsConfig, err := config.ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}

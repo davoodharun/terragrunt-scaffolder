@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"os"
 	"path/filepath"
 	"text/template"
 )
 
-//go:embed components/*
+//go:embed components/* environment/*
 var templateFS embed.FS
 
 // TemplateRenderer handles loading and rendering of templates
@@ -27,6 +28,12 @@ func NewRenderer() (*TemplateRenderer, error) {
 		"components/component.hcl.tmpl",
 		"components/resource_naming.hcl.tmpl",
 		"components/dependency.hcl.tmpl",
+		"environment/terragrunt.hcl.tmpl",
+		"environment/environment.hcl.tmpl",
+		"environment/region.hcl.tmpl",
+		"environment/subscription.hcl.tmpl",
+		"environment/root.hcl.tmpl",
+		"environment/global.hcl.tmpl",
 	}
 
 	for _, tmpl := range templates {
@@ -82,4 +89,73 @@ type ResourceNamingData struct {
 type DependencyData struct {
 	Name       string
 	ConfigPath string
+}
+
+// EnvironmentTemplateData represents the data needed for environment templates
+type EnvironmentTemplateData struct {
+	EnvironmentName           string
+	EnvironmentPrefix         string
+	Region                    string
+	RegionPrefix              string
+	Subscription              string
+	RemoteStateResourceGroup  string
+	RemoteStateStorageAccount string
+	StackName                 string
+	Component                 string
+}
+
+// GlobalConfigData represents the data needed for global configuration templates
+type GlobalConfigData struct {
+	ProjectName string
+	Stacks      map[string]StackConfig
+}
+
+// StackConfig represents the configuration for a stack
+type StackConfig struct {
+	Environments map[string]EnvironmentConfig
+}
+
+// EnvironmentConfig represents the configuration for an environment
+type EnvironmentConfig struct {
+	Prefix  string
+	Regions map[string]RegionConfig
+}
+
+// RegionConfig represents the configuration for a region
+type RegionConfig struct {
+	Prefix string
+}
+
+// Render renders a template file with the given data and writes it to the output file
+func Render(templatePath, outputPath string, data interface{}) error {
+	// Read the template file from the embedded filesystem
+	templateContent, err := templateFS.ReadFile(templatePath)
+	if err != nil {
+		return fmt.Errorf("failed to read template file %s: %w", templatePath, err)
+	}
+
+	// Parse the template
+	tmpl, err := template.New(templatePath).Parse(string(templateContent))
+	if err != nil {
+		return fmt.Errorf("failed to parse template %s: %w", templatePath, err)
+	}
+
+	// Create the output directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Create the output file
+	outputFile, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file %s: %w", outputPath, err)
+	}
+	defer outputFile.Close()
+
+	// Execute the template
+	if err := tmpl.Execute(outputFile, data); err != nil {
+		return fmt.Errorf("failed to execute template %s: %w", templatePath, err)
+	}
+
+	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/azure"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/diagram"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/pipeline"
@@ -161,7 +162,7 @@ var createContainerCmd = &cobra.Command{
 	Short: "Create a container in a storage account",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Read TGS config to get storage accounts
-		tgsConfig, err := scaffold.ReadTGSConfig()
+		tgsConfig, err := config.ReadTGSConfig()
 		if err != nil {
 			return fmt.Errorf("failed to read TGS config: %w", err)
 		}
@@ -258,13 +259,13 @@ var validateCmd = &cobra.Command{
 	},
 }
 
-// Validate tgs.yaml command
+// Validate TGS command
 var validateTGSCmd = &cobra.Command{
-	Use:   "validate-config",
-	Short: "Validate the tgs.yaml configuration file",
+	Use:   "validate-tgs",
+	Short: "Validate TGS configuration",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Read TGS config
-		tgsConfig, err := scaffold.ReadTGSConfig()
+		// Read TGS config to validate
+		tgsConfig, err := config.ReadTGSConfig()
 		if err != nil {
 			return fmt.Errorf("failed to read TGS config: %w", err)
 		}
@@ -288,8 +289,8 @@ var scaffoldCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate infrastructure scaffold",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Read TGS config first
-		tgsConfig, err := scaffold.ReadTGSConfig()
+		// Read TGS config to get environments
+		tgsConfig, err := config.ReadTGSConfig()
 		if err != nil {
 			return fmt.Errorf("failed to read TGS config: %w", err)
 		}
@@ -360,10 +361,10 @@ var diagramCmd = &cobra.Command{
 // Plan command
 var planCmd = &cobra.Command{
 	Use:   "plan",
-	Short: "Show changes that will be applied to the infrastructure",
+	Short: "Show planned changes to infrastructure",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Read TGS config first
-		tgsConfig, err := scaffold.ReadTGSConfig()
+		// Read TGS config to get environments
+		tgsConfig, err := config.ReadTGSConfig()
 		if err != nil {
 			return fmt.Errorf("failed to read TGS config: %w", err)
 		}

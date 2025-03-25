@@ -1,0 +1,91 @@
+stack:
+  name: "shared-infrastructure"
+  description: "Stack demonstrating shared infrastructure components and app-specific dependencies"
+  version: "1.0.0"
+  
+  components:
+    shared_network:
+      source: "azurerm_virtual_network"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Shared virtual network for all applications"
+
+    shared_servicebus:
+      source: "azurerm_servicebus_namespace"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Shared Service Bus namespace for all applications"
+      deps:
+        - "{region}.shared_network"
+
+    shared_storage:
+      source: "azurerm_storage_account"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Shared storage account for all applications"
+      deps:
+        - "{region}.shared_network"
+
+    appservice_orders:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Orders microservice with multiple components"
+      deps:
+        - "{region}.shared_network"
+        - "{region}.shared_servicebus"
+        - "{region}.shared_storage"
+        - "{region}.serviceplan"
+
+    appservice_inventory:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Inventory microservice with multiple components"
+      deps:
+        - "{region}.shared_network"
+        - "{region}.shared_servicebus"
+        - "{region}.shared_storage"
+        - "{region}.serviceplan"
+        - "{region}.appservice_orders.api"
+
+    appservice_shipping:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Shipping microservice with multiple components"
+      deps:
+        - "{region}.shared_network"
+        - "{region}.shared_servicebus"
+        - "{region}.shared_storage"
+        - "{region}.serviceplan"
+        - "{region}.appservice_orders.api"
+        - "{region}.appservice_inventory.api"
+
+    serviceplan:
+      source: "azurerm_service_plan"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Shared service plan for all applications"
+      deps:
+        - "{region}.shared_network"
+
+  architecture:
+    regions:
+      westeurope:
+        - component: shared_network
+        - component: shared_servicebus
+        - component: shared_storage
+        - component: serviceplan
+        - component: appservice_orders
+          apps:
+            - api
+            - worker
+        - component: appservice_inventory
+          apps:
+            - api
+            - worker
+        - component: appservice_shipping
+          apps:
+            - api
+            - worker 

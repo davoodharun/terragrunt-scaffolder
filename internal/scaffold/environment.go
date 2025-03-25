@@ -8,12 +8,25 @@ import (
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/templates"
 )
+
+type EnvironmentTemplateData struct {
+	EnvironmentName           string
+	EnvironmentPrefix         string
+	Region                    string
+	RegionPrefix              string
+	Subscription              string
+	RemoteStateResourceGroup  string
+	RemoteStateStorageAccount string
+	StackName                 string
+	Component                 string
+}
 
 func generateEnvironment(subscription, region string, envName string, components []config.RegionComponent, infraPath string) error {
 	// Get the stack name from the environment
 	stackName := "main"
-	tgsConfig, err := ReadTGSConfig()
+	tgsConfig, err := config.ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}
@@ -37,12 +50,11 @@ func generateEnvironment(subscription, region string, envName string, components
 	}
 
 	// Create environment.hcl
-	envHclContent := fmt.Sprintf(`locals {
-  environment_name = "%s"
-  environment_prefix = "%s"
-}`, envName, getEnvironmentPrefix(envName))
-
-	if err := createFile(filepath.Join(basePath, "environment.hcl"), envHclContent); err != nil {
+	envData := EnvironmentTemplateData{
+		EnvironmentName:   envName,
+		EnvironmentPrefix: getEnvironmentPrefix(envName),
+	}
+	if err := templates.Render("environment/environment.hcl.tmpl", filepath.Join(basePath, "environment.hcl"), envData); err != nil {
 		return fmt.Errorf("failed to create environment.hcl: %w", err)
 	}
 
@@ -52,12 +64,11 @@ func generateEnvironment(subscription, region string, envName string, components
 		return fmt.Errorf("failed to create region directory: %w", err)
 	}
 
-	regionHclContent := fmt.Sprintf(`locals {
-  region_name = "%s"
-  region_prefix = "%s"
-}`, region, getRegionPrefix(region))
-
-	if err := createFile(filepath.Join(regionPath, "region.hcl"), regionHclContent); err != nil {
+	regionData := EnvironmentTemplateData{
+		Region:       region,
+		RegionPrefix: getRegionPrefix(region),
+	}
+	if err := templates.Render("environment/region.hcl.tmpl", filepath.Join(regionPath, "region.hcl"), regionData); err != nil {
 		return fmt.Errorf("failed to create region.hcl: %w", err)
 	}
 
@@ -72,13 +83,12 @@ func generateEnvironment(subscription, region string, envName string, components
 		return fmt.Errorf("subscription %s not found in TGS config", subscription)
 	}
 
-	subHclContent := fmt.Sprintf(`locals {
-  subscription_name = "%s"
-  remote_state_resource_group = "%s"
-  remote_state_storage_account = "%s"
-}`, subscription, sub.RemoteState.ResourceGroup, sub.RemoteState.Name)
-
-	if err := createFile(filepath.Join(subPath, "subscription.hcl"), subHclContent); err != nil {
+	subData := EnvironmentTemplateData{
+		Subscription:              subscription,
+		RemoteStateResourceGroup:  sub.RemoteState.ResourceGroup,
+		RemoteStateStorageAccount: sub.RemoteState.Name,
+	}
+	if err := templates.Render("environment/subscription.hcl.tmpl", filepath.Join(subPath, "subscription.hcl"), subData); err != nil {
 		return fmt.Errorf("failed to create subscription.hcl: %w", err)
 	}
 
@@ -89,6 +99,11 @@ func generateEnvironment(subscription, region string, envName string, components
 			return fmt.Errorf("failed to create component directory: %w", err)
 		}
 
+		compData := EnvironmentTemplateData{
+			StackName: stackName,
+			Component: comp.Component,
+		}
+
 		if len(comp.Apps) > 0 {
 			// Create app-specific folders and terragrunt files
 			for _, app := range comp.Apps {
@@ -97,49 +112,13 @@ func generateEnvironment(subscription, region string, envName string, components
 					return fmt.Errorf("failed to create app directory %s: %w", appPath, err)
 				}
 
-				terragruntContent := fmt.Sprintf(`include "root" {
-  path = find_in_parent_folders("root.hcl")
-}
-
-include "component" {
-  path = "${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl"
-}`, stackName, comp.Component)
-
-				if err := createFile(filepath.Join(appPath, "terragrunt.hcl"), terragruntContent); err != nil {
+				if err := templates.Render("environment/terragrunt.hcl.tmpl", filepath.Join(appPath, "terragrunt.hcl"), compData); err != nil {
 					return fmt.Errorf("failed to create terragrunt.hcl for app: %w", err)
-				}
-			}
-
-			// Create single terragrunt.hcl for components without apps
-			if len(comp.Apps) == 0 {
-				terragruntContent := fmt.Sprintf(`include "root" {
-  path = find_in_parent_folders("root.hcl")
-}
-
-include "component" {
-  path = "${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl"
-}`, stackName, comp.Component)
-
-				if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), terragruntContent); err != nil {
-					return fmt.Errorf("failed to create terragrunt.hcl for component: %w", err)
 				}
 			}
 		} else {
 			// Create single terragrunt.hcl for components without apps
-			terragruntContent := fmt.Sprintf(`include "root" {
-  path = find_in_parent_folders("root.hcl")
-}
-
-include "component" {
-  path = "${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl"
-}
-
-locals {
-  component_vars = read_terragrunt_config("${get_repo_root()}/.infrastructure/_components/%s/%s/component.hcl")
-  env_vars = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/${local.component_vars.locals.stack_name}/${local.environment_name}.hcl")
-}`, stackName, comp.Component, stackName, comp.Component)
-
-			if err := createFile(filepath.Join(compPath, "terragrunt.hcl"), terragruntContent); err != nil {
+			if err := templates.Render("environment/terragrunt.hcl.tmpl", filepath.Join(compPath, "terragrunt.hcl"), compData); err != nil {
 				return fmt.Errorf("failed to create terragrunt.hcl for component: %w", err)
 			}
 		}
@@ -155,48 +134,71 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Generate global.hcl with the name property from tgs.yaml
-	globalHCL := fmt.Sprintf(`# Global configuration values
-locals {
-  # Project name from tgs.yaml
-  project_name = "%s"
-  
-  # Resource group configuration by environment and region
-  resource_groups = {
-    dev = {
-      eastus2 = "rg-${local.project_name}-e2-d"
-      westus2 = "rg-${local.project_name}-w2-d"
-    }
-    test = {
-      eastus2 = "rg-${local.project_name}-e2-t"
-      westus2 = "rg-${local.project_name}-w2-t"
-    }
-    stage = {
-      eastus2 = "rg-${local.project_name}-e2-s"
-      westus2 = "rg-${local.project_name}-w2-s"
-    }
-    prod = {
-      eastus2 = "rg-${local.project_name}-e2-p"
-      westus2 = "rg-${local.project_name}-w2-p"
-    }
-  }
-  
-  # Common tags for all resources
-  common_tags = {
-    Project = local.project_name
-    ManagedBy = "Terragrunt"
-  }
-}`, tgsConfig.Name)
+	// Build the data structure for global.hcl template
+	globalData := templates.GlobalConfigData{
+		ProjectName: tgsConfig.Name,
+		Stacks:      make(map[string]templates.StackConfig),
+	}
 
+	// Track unique stacks and their environments
+	uniqueStacks := make(map[string]bool)
+	stackEnvironments := make(map[string]map[string]bool)
+
+	// First pass: collect all unique stacks and their environments
+	for _, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
+			}
+			uniqueStacks[stackName] = true
+
+			if _, ok := stackEnvironments[stackName]; !ok {
+				stackEnvironments[stackName] = make(map[string]bool)
+			}
+			stackEnvironments[stackName][env.Name] = true
+		}
+	}
+
+	// Second pass: build the complete data structure
+	for stackName := range uniqueStacks {
+		stackConfig := templates.StackConfig{
+			Environments: make(map[string]templates.EnvironmentConfig),
+		}
+
+		// Add environments for this stack
+		for envName := range stackEnvironments[stackName] {
+			envConfig := templates.EnvironmentConfig{
+				Prefix:  getEnvironmentPrefix(envName),
+				Regions: make(map[string]templates.RegionConfig),
+			}
+
+			// Add regions for this environment
+			// We'll use the regions from the stack configuration
+			mainConfig, err := ReadMainConfig(stackName)
+			if err != nil {
+				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+			}
+
+			for region := range mainConfig.Stack.Architecture.Regions {
+				envConfig.Regions[region] = templates.RegionConfig{
+					Prefix: getRegionPrefix(region),
+				}
+			}
+
+			stackConfig.Environments[envName] = envConfig
+		}
+
+		globalData.Stacks[stackName] = stackConfig
+	}
+
+	// Generate global.hcl using the template
 	globalPath := filepath.Join(configDir, "global.hcl")
-	if err := createFile(globalPath, globalHCL); err != nil {
+	if err := templates.Render("environment/global.hcl.tmpl", globalPath, globalData); err != nil {
 		return fmt.Errorf("failed to create global config file: %w", err)
 	}
 
 	logger.Success("Generated environment configuration files")
-
-	// Track unique stacks to create their directories
-	uniqueStacks := make(map[string]bool)
 
 	// Generate a config file for each environment in each subscription
 	for _, sub := range tgsConfig.Subscriptions {
@@ -208,9 +210,6 @@ locals {
 			if env.Stack != "" {
 				stackName = env.Stack
 			}
-
-			// Track this stack
-			uniqueStacks[stackName] = true
 
 			// Create stack-specific config directory
 			stackConfigDir := filepath.Join(configDir, stackName)
@@ -404,34 +403,17 @@ func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
 		return fmt.Errorf("failed to create infrastructure directory: %w", err)
 	}
 
-	rootHCL := `# Include this in all terragrunt.hcl files
-locals {
-  subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
-  global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
-  environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
-  
-  subscription_name = local.subscription_vars.locals.subscription_name
-  project_name = local.global_config.locals.project_name
-  remote_state_resource_group = local.subscription_vars.locals.remote_state_resource_group
-  remote_state_storage_account = local.subscription_vars.locals.remote_state_storage_account
-  
-  # Infrastructure path relative to repo root
-  infrastructure_path = ".infrastructure"
-}
+	// Create a new template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to create template renderer: %w", err)
+	}
 
-remote_state {
-  backend = "azurerm"
-  config = {
-    resource_group_name  = local.remote_state_resource_group
-    storage_account_name = local.remote_state_storage_account
-    container_name       = local.project_name
-    key                  = "${path_relative_to_include()}/terraform.tfstate"
-  }
-  generate = {
-    path      = "backend.tf"
-    if_exists = "overwrite_terragrunt"
-  }
-}`
+	// Render the root.hcl template
+	rootHCL, err := renderer.RenderTemplate("environment/root.hcl.tmpl", nil)
+	if err != nil {
+		return fmt.Errorf("failed to render root.hcl template: %w", err)
+	}
 
 	return createFile(filepath.Join(baseDir, "root.hcl"), rootHCL)
 }

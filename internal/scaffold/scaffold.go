@@ -95,7 +95,7 @@ func Generate() error {
 	infraPath := getInfrastructurePath()
 
 	// Read TGS config
-	tgsConfig, err := ReadTGSConfig()
+	tgsConfig, err := config.ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}
@@ -245,34 +245,6 @@ func cleanupSchemaCache() {
 	}
 }
 
-// ReadTGSConfig reads the TGS configuration from tgs.yaml
-func ReadTGSConfig() (*config.TGSConfig, error) {
-	// Get the config directory
-	configDir := getConfigDir()
-
-	// Try to read from the .tgs directory first
-	configPath := filepath.Join(configDir, "tgs.yaml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		// Try the current directory
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get current working directory: %w", err)
-		}
-		data, err = os.ReadFile(filepath.Join(cwd, "tgs.yaml"))
-		if err != nil {
-			return nil, fmt.Errorf("failed to read TGS config: %w", err)
-		}
-	}
-
-	var cfg config.TGSConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-
-	return &cfg, nil
-}
-
 // ReadMainConfig reads the stack configuration from the .tgs/stacks directory
 func ReadMainConfig(stackName string) (*config.MainConfig, error) {
 	stackPath := filepath.Join(".tgs", "stacks", fmt.Sprintf("%s.yaml", stackName))
@@ -341,6 +313,8 @@ func getRegionPrefix(region string) string {
 	regionPrefixMap := map[string]string{
 		"eastus":        "E",
 		"eastus2":       "E2",
+		"canadacentral": "CC",
+		"canadaeast":    "CE",
 		"westus":        "W",
 		"westus2":       "W2",
 		"centralus":     "C",

@@ -1,0 +1,106 @@
+stack:
+  name: "global-services"
+  description: "Multi-region stack with global services and cross-region dependencies"
+  version: "1.0.0"
+  
+  components:
+    frontdoor_profile:
+      source: "azurerm_cdn_frontdoor_profile"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Front Door profile for global load balancing (region-agnostic)"
+
+    frontdoor_endpoint:
+      source: "azurerm_cdn_frontdoor_endpoint"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Front Door endpoint for the web application (region-agnostic)"
+      deps:
+        - "westeurope.frontdoor_profile"
+
+    frontdoor_origin_group:
+      source: "azurerm_cdn_frontdoor_origin_group"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Front Door origin group for web applications (region-agnostic)"
+      deps:
+        - "westeurope.frontdoor_profile"
+
+    frontdoor_origin:
+      source: "azurerm_cdn_frontdoor_origin"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Front Door origins for regional web apps (region-agnostic)"
+      deps:
+        - "westeurope.frontdoor_origin_group"
+        - "westeurope.appservice_frontend.web"
+        - "eastus2.appservice_frontend.web"
+
+    frontdoor_route:
+      source: "azurerm_cdn_frontdoor_route"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Front Door routing rules (region-agnostic)"
+      deps:
+        - "westeurope.frontdoor_endpoint"
+        - "westeurope.frontdoor_origin_group"
+
+    serviceplan:
+      source: "azurerm_service_plan"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Regional service plan for web applications"
+
+    appservice_frontend:
+      source: "azurerm_linux_web_app"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Frontend web application with regional instances"
+      deps:
+        - "{region}.serviceplan"
+        - "{region}.keyvault"
+        - "westeurope.cosmosdb"
+
+    keyvault:
+      source: "azurerm_key_vault"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Regional key vault for application secrets"
+
+    cosmosdb:
+      source: "azurerm_cosmosdb_account"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Global Cosmos DB account with multi-region replication (region-agnostic)"
+
+    monitor:
+      source: "azurerm_monitor_action_group"
+      provider: "azurerm"
+      version: "3.0.0"
+      description: "Global monitoring and alerting (region-agnostic)"
+      deps:
+        - "westeurope.appservice_frontend.web"
+        - "eastus2.appservice_frontend.web"
+        - "westeurope.frontdoor_profile"
+
+  architecture:
+    regions:
+      westeurope:
+        - component: frontdoor_profile
+        - component: frontdoor_endpoint
+        - component: frontdoor_origin_group
+        - component: frontdoor_origin
+        - component: frontdoor_route
+        - component: cosmosdb
+        - component: monitor
+        - component: serviceplan
+        - component: appservice_frontend
+          apps:
+            - web
+        - component: keyvault
+      eastus2:
+        - component: serviceplan
+        - component: appservice_frontend
+          apps:
+            - web
+        - component: keyvault 

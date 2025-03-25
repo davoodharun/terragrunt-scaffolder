@@ -75,6 +75,11 @@ var ValidAzureResourceTypes = map[string]bool{
 	"azurerm_private_endpoint":                      true,
 	"azurerm_private_dns_zone":                      true,
 	"azurerm_private_dns_zone_virtual_network_link": true,
+	"azurerm_cdn_frontdoor_profile":                 true,
+	"azurerm_cdn_frontdoor_endpoint":                true,
+	"azurerm_cdn_frontdoor_origin_group":            true,
+	"azurerm_cdn_frontdoor_origin":                  true,
+	"azurerm_cdn_frontdoor_route":                   true,
 }
 
 // ValidationError represents a validation error with context

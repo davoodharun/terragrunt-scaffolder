@@ -11,7 +11,7 @@ import (
 )
 
 // TGSYamlTemplate is the default template for tgs.yaml
-const TGSYamlTemplate = `name: projectA  # Your project name
+const TGSYamlTemplate = `name: projecta  # Your project name
 
 # Resource naming configuration
 naming:
@@ -255,20 +255,6 @@ func CreateStack(name string) error {
 											{Kind: yaml.ScalarNode, Value: "Redis cache for application caching"},
 										},
 									},
-									{Kind: yaml.ScalarNode, Value: "keyvault"},
-									{
-										Kind: yaml.MappingNode,
-										Content: []*yaml.Node{
-											{Kind: yaml.ScalarNode, Value: "source"},
-											{Kind: yaml.ScalarNode, Value: "azurerm_key_vault"},
-											{Kind: yaml.ScalarNode, Value: "provider"},
-											{Kind: yaml.ScalarNode, Value: "azurerm"},
-											{Kind: yaml.ScalarNode, Value: "version"},
-											{Kind: yaml.ScalarNode, Value: "3.0.0"},
-											{Kind: yaml.ScalarNode, Value: "description"},
-											{Kind: yaml.ScalarNode, Value: "Key Vault for storing secrets and certificates"},
-										},
-									},
 									{Kind: yaml.ScalarNode, Value: "appservice_api"},
 									{
 										Kind: yaml.MappingNode,
@@ -287,7 +273,6 @@ func CreateStack(name string) error {
 												Content: []*yaml.Node{
 													{Kind: yaml.ScalarNode, Value: "{region}.serviceplan"},
 													{Kind: yaml.ScalarNode, Value: "{region}.rediscache"},
-													{Kind: yaml.ScalarNode, Value: "{region}.keyvault"},
 													{Kind: yaml.ScalarNode, Value: "westus2.appservice.web"},
 												},
 											},
@@ -322,15 +307,6 @@ func CreateStack(name string) error {
 														Content: []*yaml.Node{
 															{Kind: yaml.ScalarNode, Value: "component"},
 															{Kind: yaml.ScalarNode, Value: "rediscache"},
-															{Kind: yaml.ScalarNode, Value: "apps"},
-															{Kind: yaml.SequenceNode},
-														},
-													},
-													{
-														Kind: yaml.MappingNode,
-														Content: []*yaml.Node{
-															{Kind: yaml.ScalarNode, Value: "component"},
-															{Kind: yaml.ScalarNode, Value: "keyvault"},
 															{Kind: yaml.ScalarNode, Value: "apps"},
 															{Kind: yaml.SequenceNode},
 														},

@@ -1,0 +1,7 @@
+include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+include "component" {
+  path = "${get_repo_root()}/.infrastructure/_components/{{.StackName}}/{{.Component}}/component.hcl"
+} 

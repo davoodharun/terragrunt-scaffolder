@@ -93,6 +93,11 @@ func ReadTGSConfig() (*TGSConfig, error) {
 		return nil, fmt.Errorf("failed to parse TGS config: %w", err)
 	}
 
+	// Validate project name
+	if err := validateProjectName(config.Name); err != nil {
+		return nil, fmt.Errorf("invalid project name: %w", err)
+	}
+
 	// Set default naming configuration if not provided
 	if config.Naming.Format == "" {
 		config.Naming.Format = "${project}-${region}${env}-${type}"
@@ -102,6 +107,46 @@ func ReadTGSConfig() (*TGSConfig, error) {
 	}
 
 	return &config, nil
+}
+
+// validateProjectName ensures the project name follows the required format:
+// - Lowercase letters, numbers, and hyphens only
+// - Must start with a lowercase letter or number
+// - No consecutive hyphens
+func validateProjectName(name string) error {
+	if name == "" {
+		return fmt.Errorf("project name cannot be empty")
+	}
+
+	// Check first character is lowercase letter or number
+	firstChar := rune(name[0])
+	if !((firstChar >= 'a' && firstChar <= 'z') || (firstChar >= '0' && firstChar <= '9')) {
+		return fmt.Errorf("project name must start with a lowercase letter or number")
+	}
+
+	// Check for valid characters and consecutive hyphens
+	prevHyphen := false
+	for _, char := range name {
+		if char == '-' {
+			if prevHyphen {
+				return fmt.Errorf("project name cannot contain consecutive hyphens")
+			}
+			prevHyphen = true
+		} else if char >= 'A' && char <= 'Z' {
+			return fmt.Errorf("project name cannot contain uppercase letters")
+		} else if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')) {
+			return fmt.Errorf("project name can only contain lowercase letters, numbers, and hyphens")
+		} else {
+			prevHyphen = false
+		}
+	}
+
+	// Check if name ends with hyphen
+	if name[len(name)-1] == '-' {
+		return fmt.Errorf("project name cannot end with a hyphen")
+	}
+
+	return nil
 }
 
 // ReadMainConfig reads the main stack configuration file

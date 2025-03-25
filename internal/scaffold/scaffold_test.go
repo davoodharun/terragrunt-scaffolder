@@ -24,12 +24,12 @@ func TestGenerateCommand(t *testing.T) {
 	}{
 		{
 			name: "Valid configuration",
-			tgsConfig: `name: CUSTTP
+			tgsConfig: `name: projecta
 subscriptions:
   nonprod:
     remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
+      name: stprojectanonprodtf
+      resource_group: rg-projecta-nonprod-tf
     environments:
       - name: dev
         stack: main`,
@@ -65,8 +65,8 @@ subscriptions:
 			tgsConfig: `subscriptions:
   nonprod:
     remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
+      name: stprojectanonprodtf
+      resource_group: rg-projecta-nonprod-tf
     environments:
       - name: dev
         stack: main`,
@@ -81,11 +81,11 @@ subscriptions:
       version: 4.22.0
       description: "Redis cache"`,
 			wantErr:     true,
-			errContains: "name property must be filled",
+			errContains: "project name cannot be empty",
 		},
 		{
 			name: "Missing remotestate in subscription",
-			tgsConfig: `name: CUSTTP
+			tgsConfig: `name: projecta
 subscriptions:
   nonprod:
     environments:
@@ -106,12 +106,12 @@ subscriptions:
 		},
 		{
 			name: "Missing stack version",
-			tgsConfig: `name: CUSTTP
+			tgsConfig: `name: projecta
 subscriptions:
   nonprod:
     remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
+      name: stprojectanonprodtf
+      resource_group: rg-projecta-nonprod-tf
     environments:
       - name: dev
         stack: main`,
@@ -129,12 +129,12 @@ subscriptions:
 		},
 		{
 			name: "Missing component description",
-			tgsConfig: `name: CUSTTP
+			tgsConfig: `name: projecta
 subscriptions:
   nonprod:
     remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
+      name: stprojectanonprodtf
+      resource_group: rg-projecta-nonprod-tf
     environments:
       - name: dev
         stack: main`,
@@ -152,12 +152,12 @@ subscriptions:
 		},
 		{
 			name: "Invalid dependency format",
-			tgsConfig: `name: CUSTTP
+			tgsConfig: `name: projecta
 subscriptions:
   nonprod:
     remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
+      name: stprojectanonprodtf
+      resource_group: rg-projecta-nonprod-tf
     environments:
       - name: dev
         stack: main`,
@@ -178,12 +178,12 @@ subscriptions:
 		},
 		{
 			name: "Component referenced in architecture but not defined",
-			tgsConfig: `name: CUSTTP
+			tgsConfig: `name: projecta
 subscriptions:
   nonprod:
     remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
+      name: stprojectanonprodtf
+      resource_group: rg-projecta-nonprod-tf
     environments:
       - name: dev
         stack: main`,
@@ -207,12 +207,12 @@ subscriptions:
 		},
 		{
 			name: "Invalid region in dependency",
-			tgsConfig: `name: CUSTTP
+			tgsConfig: `name: projecta
 subscriptions:
   nonprod:
     remotestate:
-      name: custstfstatessta000
-      resource_group: CUSTTP-E-N-TFSTATE-RGP
+      name: stprojectanonprodtf
+      resource_group: rg-projecta-nonprod-tf
     environments:
       - name: dev
         stack: main`,
