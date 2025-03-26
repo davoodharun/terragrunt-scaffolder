@@ -61,6 +61,10 @@ jobs:
         new_patch=$((patch + 1))
         new_version="v$major.$minor.$new_patch"
         
+        # Create and push the new tag
+        git tag $new_version
+        git push origin $new_version
+        
         echo "New version will be: $new_version"
         echo "new_version=$new_version" >> $GITHUB_OUTPUT
     
