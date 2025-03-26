@@ -226,12 +226,6 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 
 	// Generate a config file for each environment in each subscription
 	for subName, sub := range tgsConfig.Subscriptions {
-		// Create environments directory for this subscription
-		environmentsDir := filepath.Join(configDir, "environments", subName)
-		if err := os.MkdirAll(environmentsDir, 0755); err != nil {
-			return fmt.Errorf("failed to create environments directory: %w", err)
-		}
-
 		for _, env := range sub.Environments {
 			envName := env.Name
 
@@ -239,6 +233,12 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 			stackName := "main"
 			if env.Stack != "" {
 				stackName = env.Stack
+			}
+
+			// Create environments directory under the stack's config folder
+			environmentsDir := filepath.Join(configDir, stackName, "environments", subName)
+			if err := os.MkdirAll(environmentsDir, 0755); err != nil {
+				return fmt.Errorf("failed to create environments directory: %w", err)
 			}
 
 			// Read the stack configuration to get actual components
@@ -440,4 +440,53 @@ func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
 	}
 
 	return createFile(filepath.Join(baseDir, "root.hcl"), rootHCL)
+}
+
+// generateEnvironmentConfig creates environment-specific configuration files
+func generateEnvironmentConfig(infraPath string, tgsConfig *config.TGSConfig, stackName string) error {
+	// Create environments directory under the stack's config folder
+	environmentsDir := filepath.Join(infraPath, "config", stackName, "environments")
+	if err := os.MkdirAll(environmentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create environments directory: %w", err)
+	}
+
+	// Initialize template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to create template renderer: %w", err)
+	}
+
+	// Generate environment config files for each subscription and environment
+	for subName, sub := range tgsConfig.Subscriptions {
+		// Create subscription directory
+		subDir := filepath.Join(environmentsDir, subName)
+		if err := os.MkdirAll(subDir, 0755); err != nil {
+			return fmt.Errorf("failed to create subscription directory: %w", err)
+		}
+
+		for _, env := range sub.Environments {
+			// Skip environments that don't belong to this stack
+			if env.Stack != "" && env.Stack != stackName {
+				continue
+			}
+
+			// Create environment config file
+			envConfigPath := filepath.Join(subDir, env.Name+".env.hcl")
+			envConfigData := templates.EnvironmentConfigData{
+				EnvironmentName:   env.Name,
+				EnvironmentPrefix: env.Prefix,
+				StackName:         stackName,
+			}
+			envConfigContent, err := renderer.RenderTemplate("environment_config.hcl.tmpl", envConfigData)
+			if err != nil {
+				return fmt.Errorf("failed to render environment config template: %w", err)
+			}
+
+			if err := createFile(envConfigPath, envConfigContent); err != nil {
+				return fmt.Errorf("failed to create environment config file: %w", err)
+			}
+		}
+	}
+
+	return nil
 }

@@ -1,0 +1,47 @@
+locals {
+  environment_name = "{{ .EnvironmentName }}"
+  environment_prefix = "{{ .EnvironmentPrefix }}"
+  stack_name = "{{ .StackName }}"
+
+  # Component-specific configurations
+  serviceplan = {
+    sku_name = "B1"
+    os_type = "Linux"
+  }
+
+  appservice = {
+    app_settings = {}
+    site_config = {}
+  }
+
+  functionapp = {
+    app_settings = {}
+  }
+
+  sql = {
+    sku_name = "Basic"
+    version = "12.0"
+    administrator_login = "sqladmin"
+    administrator_login_password = "" # Required: Set this in environment config
+  }
+
+  redis = {
+    sku_name = "Basic"
+    family = "C"
+  }
+
+  keyvault = {
+    sku_name = "standard"
+    purge_protection_enabled = false
+  }
+
+  storage = {
+    account_tier = "Standard"
+    account_replication_type = "LRS"
+  }
+
+  cosmos = {
+    offer_type = "Standard"
+    consistency_level = "Session"
+  }
+} 

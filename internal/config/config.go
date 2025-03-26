@@ -43,8 +43,9 @@ type RemoteState struct {
 
 // Environment represents an environment configuration
 type Environment struct {
-	Name  string `yaml:"name"`
-	Stack string `yaml:"stack,omitempty"`
+	Name   string `yaml:"name"`
+	Prefix string `yaml:"prefix"`
+	Stack  string `yaml:"stack,omitempty"`
 }
 
 // MainConfig represents the main stack configuration

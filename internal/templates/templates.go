@@ -11,3 +11,10 @@ type PolicyData struct {
 	ComponentName string
 	StackName     string
 }
+
+// EnvironmentConfigData represents the data needed for environment config template
+type EnvironmentConfigData struct {
+	EnvironmentName   string
+	EnvironmentPrefix string
+	StackName         string
+}

@@ -7,7 +7,7 @@ locals {
   region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
   environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
   global_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/global.hcl")
-  env_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/environments/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}.env.hcl")
+  env_config = read_terragrunt_config("${get_repo_root()}/.infrastructure/config/{{ .StackName }}/environments/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}.env.hcl")
 
   # Common variables
   project_name = local.global_config.locals.project_name
