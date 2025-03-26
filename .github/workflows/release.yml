@@ -4,6 +4,17 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Type of version bump'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
@@ -57,9 +68,33 @@ jobs:
         # Extract the version numbers
         IFS='.' read -r major minor patch <<< "${latest_tag#v}"
         
-        # Increment patch version
-        new_patch=$((patch + 1))
-        new_version="v$major.$minor.$new_patch"
+        # Determine version bump type
+        bump_type="${{ github.event.inputs.version_bump || 'patch' }}"
+        
+        # Increment version based on bump type
+        case $bump_type in
+          "major")
+            major=$((major + 1))
+            minor=0
+            patch=0
+            ;;
+          "minor")
+            minor=$((minor + 1))
+            patch=0
+            ;;
+          "patch")
+            patch=$((patch + 1))
+            ;;
+        esac
+        
+        new_version="v$major.$minor.$patch"
+        
+        # Check if tag exists
+        if git tag -l "$new_version" | grep -q "$new_version"; then
+          # If tag exists, increment patch version
+          patch=$((patch + 1))
+          new_version="v$major.$minor.$patch"
+        fi
         
         # Create and push the new tag
         git tag $new_version
@@ -103,6 +138,9 @@ jobs:
           Automated release from main branch
           
           This release includes all changes merged to the main branch.
+          
+          ### Version Bump Type
+          ${{ github.event.inputs.version_bump || 'patch' }}
           
           ### Binaries
           - Windows (64-bit): tgs-windows-amd64.exe
