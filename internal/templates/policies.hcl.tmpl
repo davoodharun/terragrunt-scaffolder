@@ -7,7 +7,7 @@ locals {
   environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
 
   # Define path to policy file
-  policy_path = "${get_repo_root()}/.infrastructure/policy_files_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.app_name}.policy.xml"
+  policy_path = "${get_repo_root()}/.infrastructure/config/{{ .StackName }}/policy_files_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.app_name}.policy.xml"
 }
 
 inputs = {

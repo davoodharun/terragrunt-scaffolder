@@ -225,7 +225,13 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 	logger.Success("Generated environment configuration files")
 
 	// Generate a config file for each environment in each subscription
-	for _, sub := range tgsConfig.Subscriptions {
+	for subName, sub := range tgsConfig.Subscriptions {
+		// Create environments directory for this subscription
+		environmentsDir := filepath.Join(configDir, "environments", subName)
+		if err := os.MkdirAll(environmentsDir, 0755); err != nil {
+			return fmt.Errorf("failed to create environments directory: %w", err)
+		}
+
 		for _, env := range sub.Environments {
 			envName := env.Name
 
@@ -233,12 +239,6 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 			stackName := "main"
 			if env.Stack != "" {
 				stackName = env.Stack
-			}
-
-			// Create stack-specific config directory
-			stackConfigDir := filepath.Join(configDir, stackName)
-			if err := os.MkdirAll(stackConfigDir, 0755); err != nil {
-				return fmt.Errorf("failed to create stack config directory: %w", err)
 			}
 
 			// Read the stack configuration to get actual components
@@ -328,8 +328,8 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 
 			configContent.WriteString("}")
 
-			// Create environment config file in the stack-specific directory
-			configPath := filepath.Join(stackConfigDir, fmt.Sprintf("%s.hcl", envName))
+			// Create environment config file in the environments directory
+			configPath := filepath.Join(environmentsDir, fmt.Sprintf("%s.env.hcl", envName))
 			if err := createFile(configPath, configContent.String()); err != nil {
 				return fmt.Errorf("failed to create environment config file: %w", err)
 			}

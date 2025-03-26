@@ -8,9 +8,9 @@ locals {
 
   # Define paths to settings files
   settings_paths = {
-    global = "${get_repo_root()}/.infrastructure/app_settings_{{ .ComponentName }}/global.appsettings.json"
-    env    = "${get_repo_root()}/.infrastructure/app_settings_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.environment_vars.locals.environment_name}.appsettings.json"
-    app    = "${get_repo_root()}/.infrastructure/app_settings_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.app_name}.appsettings.json"
+    global = "${get_repo_root()}/.infrastructure/config/{{ .StackName }}/app_settings_{{ .ComponentName }}/global.appsettings.json"
+    env    = "${get_repo_root()}/.infrastructure/config/{{ .StackName }}/app_settings_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.environment_vars.locals.environment_name}.appsettings.json"
+    app    = "${get_repo_root()}/.infrastructure/config/{{ .StackName }}/app_settings_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.app_name}.appsettings.json"
   }
 
   # Read and merge settings

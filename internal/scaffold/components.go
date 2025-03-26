@@ -1,7 +1,6 @@
 package scaffold
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -373,14 +372,14 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 			if app == "" || app == "{app}" {
 				if app == "{app}" {
 					// App-specific dependency using current app
-					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_name}/%s/${local.environment_name}/%s/${local.app_name}", region, component)
+					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s/${local.app_name}", region, component)
 				} else {
 					// Component-level dependency
-					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_name}/%s/${local.environment_name}/%s", region, component)
+					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s", region, component)
 				}
 			} else {
 				// App-specific dependency with fixed app name
-				configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_name}/%s/${local.environment_name}/%s/%s", region, component, app)
+				configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s/%s", region, component, app)
 				depName = fmt.Sprintf("%s_%s", component, app)
 			}
 
@@ -403,7 +402,7 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 			blocks = append(blocks, block)
 		} else {
 			// Handle analyzed dependencies (component name only)
-			configPath := fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_name}/${local.region_vars.locals.region_name}/${local.environment_vars.locals.environment_name}/%s", dep)
+			configPath := fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_vars.locals.subscription_name}/${local.region_vars.locals.region_name}/${local.environment_vars.locals.environment_name}/%s", dep)
 
 			// Ensure unique dependency name
 			depName := dep
@@ -429,175 +428,114 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 }
 
 // generateAppSettingsStructure creates the app settings folder structure for a component
-func generateAppSettingsStructure(compName, infraPath string, tgsConfig *config.TGSConfig, apps []string) error {
-	logger.Info("Generating app settings structure for component %s with apps: %v", compName, apps)
-
-	// Create the app settings folder for this component
-	appSettingsPath := filepath.Join(infraPath, fmt.Sprintf("app_settings_%s", compName))
-	if err := os.MkdirAll(appSettingsPath, 0755); err != nil {
+func generateAppSettingsStructure(compName string, infraPath string, tgsConfig *config.TGSConfig, apps []string) error {
+	// Create app settings directory under the stack's config folder
+	appSettingsDir := filepath.Join(infraPath, "config", "main", "app_settings_"+compName)
+	if err := os.MkdirAll(appSettingsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create app settings directory: %w", err)
 	}
 
 	// Initialize template renderer
 	renderer, err := templates.NewRenderer()
 	if err != nil {
-		return fmt.Errorf("failed to initialize template renderer: %w", err)
+		return fmt.Errorf("failed to create template renderer: %w", err)
 	}
 
-	// Generate global app settings file in the root
-	globalSettingsPath := filepath.Join(appSettingsPath, "global.appsettings.json")
-	globalSettings := map[string]interface{}{
-		"component": compName,
-		"apps":      apps,
+	// Generate global app settings file
+	globalSettingsPath := filepath.Join(appSettingsDir, "global.appsettings.json")
+	if err := createFile(globalSettingsPath, "{}"); err != nil {
+		return fmt.Errorf("failed to create global app settings file: %w", err)
 	}
-	globalContent, err := json.MarshalIndent(globalSettings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal global settings: %w", err)
-	}
-	if err := os.WriteFile(globalSettingsPath, globalContent, 0644); err != nil {
-		return fmt.Errorf("failed to write global settings file: %w", err)
-	}
-	logger.Info("Created global settings file: %s", globalSettingsPath)
 
-	// Generate appsettings.hcl file in the root
-	appSettingsHclPath := filepath.Join(appSettingsPath, "appsettings.hcl")
-	appSettingsData := &templates.AppSettingsData{
-		ComponentName: compName,
-	}
-	appSettingsHcl, err := renderer.RenderTemplate("appsettings.hcl.tmpl", appSettingsData)
-	if err != nil {
-		return fmt.Errorf("failed to render appsettings.hcl template: %w", err)
-	}
-	if err := os.WriteFile(appSettingsHclPath, []byte(appSettingsHcl), 0644); err != nil {
-		return fmt.Errorf("failed to write appsettings.hcl file: %w", err)
-	}
-	logger.Info("Created appsettings.hcl file: %s", appSettingsHclPath)
-
-	// Create subscription folders and their environment folders
+	// Create subscription and environment folders
 	for subName, sub := range tgsConfig.Subscriptions {
-		logger.Info("Processing subscription: %s", subName)
-		subPath := filepath.Join(appSettingsPath, subName)
-		if err := os.MkdirAll(subPath, 0755); err != nil {
-			return fmt.Errorf("failed to create subscription directory: %w", err)
-		}
-
-		// Create environment folders and generate app settings files
 		for _, env := range sub.Environments {
-			logger.Info("Processing environment: %s in subscription %s", env.Name, subName)
-			envPath := filepath.Join(subPath, env.Name)
-			if err := os.MkdirAll(envPath, 0755); err != nil {
+			// Create environment directory
+			envDir := filepath.Join(appSettingsDir, subName, env.Name)
+			if err := os.MkdirAll(envDir, 0755); err != nil {
 				return fmt.Errorf("failed to create environment directory: %w", err)
 			}
 
-			// Generate environment-level app settings file
-			envSettingsPath := filepath.Join(envPath, fmt.Sprintf("%s.appsettings.json", env.Name))
-			envSettings := map[string]interface{}{
-				"environment":  env.Name,
-				"subscription": subName,
-				"component":    compName,
-			}
-			envContent, err := json.MarshalIndent(envSettings, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal environment settings: %w", err)
-			}
-			if err := os.WriteFile(envSettingsPath, envContent, 0644); err != nil {
-				return fmt.Errorf("failed to write environment settings file: %w", err)
+			// Create environment app settings file
+			envSettingsPath := filepath.Join(envDir, env.Name+".appsettings.json")
+			if err := createFile(envSettingsPath, "{}"); err != nil {
+				return fmt.Errorf("failed to create environment app settings file: %w", err)
 			}
 
-			// Generate app-specific app settings files
+			// Create app-specific settings files
 			for _, app := range apps {
-				// Generate app-specific app settings file
-				appSettingsPath := filepath.Join(envPath, fmt.Sprintf("%s.appsettings.json", app))
-				settings := map[string]interface{}{
-					"name":         app,
-					"environment":  env.Name,
-					"subscription": subName,
-				}
-				content, err := json.MarshalIndent(settings, "", "  ")
-				if err != nil {
-					return fmt.Errorf("failed to marshal app settings: %w", err)
-				}
-				if err := os.WriteFile(appSettingsPath, content, 0644); err != nil {
-					return fmt.Errorf("failed to write app settings file: %w", err)
+				appSettingsPath := filepath.Join(envDir, app+".appsettings.json")
+				if err := createFile(appSettingsPath, "{}"); err != nil {
+					return fmt.Errorf("failed to create app settings file: %w", err)
 				}
 			}
 		}
+	}
+
+	// Generate appsettings.hcl file
+	appSettingsData := templates.AppSettingsData{
+		ComponentName: compName,
+		StackName:     "main", // TODO: Get this from the stack config
+	}
+	appSettingsContent, err := renderer.RenderTemplate("appsettings.hcl.tmpl", appSettingsData)
+	if err != nil {
+		return fmt.Errorf("failed to render appsettings.hcl template: %w", err)
+	}
+
+	appSettingsHCLPath := filepath.Join(appSettingsDir, "appsettings.hcl")
+	if err := createFile(appSettingsHCLPath, appSettingsContent); err != nil {
+		return fmt.Errorf("failed to create appsettings.hcl file: %w", err)
 	}
 
 	return nil
 }
 
 // generatePolicyFilesStructure creates the policy files folder structure for a component
-func generatePolicyFilesStructure(compName, infraPath string, tgsConfig *config.TGSConfig, apps []string) error {
-	logger.Info("Generating policy files structure for component %s with apps: %v", compName, apps)
-
-	// Create the policy files folder for this component
-	policyFilesPath := filepath.Join(infraPath, fmt.Sprintf("policy_files_%s", compName))
-	if err := os.MkdirAll(policyFilesPath, 0755); err != nil {
+func generatePolicyFilesStructure(compName string, infraPath string, tgsConfig *config.TGSConfig, apps []string) error {
+	// Create policy files directory under the stack's config folder
+	policyFilesDir := filepath.Join(infraPath, "config", "main", "policy_files_"+compName)
+	if err := os.MkdirAll(policyFilesDir, 0755); err != nil {
 		return fmt.Errorf("failed to create policy files directory: %w", err)
 	}
 
 	// Initialize template renderer
 	renderer, err := templates.NewRenderer()
 	if err != nil {
-		return fmt.Errorf("failed to initialize template renderer: %w", err)
+		return fmt.Errorf("failed to create template renderer: %w", err)
 	}
 
-	// Generate policies.hcl file in the root
-	policiesHclPath := filepath.Join(policyFilesPath, "policies.hcl")
-	policiesData := &templates.AppSettingsData{
-		ComponentName: compName,
-	}
-	policiesHcl, err := renderer.RenderTemplate("policies.hcl.tmpl", policiesData)
-	if err != nil {
-		return fmt.Errorf("failed to render policies.hcl template: %w", err)
-	}
-	if err := os.WriteFile(policiesHclPath, []byte(policiesHcl), 0644); err != nil {
-		return fmt.Errorf("failed to write policies.hcl file: %w", err)
-	}
-	logger.Info("Created policies.hcl file: %s", policiesHclPath)
-
-	// Create subscription folders and their environment folders
+	// Create subscription and environment folders
 	for subName, sub := range tgsConfig.Subscriptions {
-		logger.Info("Processing subscription: %s", subName)
-		subPath := filepath.Join(policyFilesPath, subName)
-		if err := os.MkdirAll(subPath, 0755); err != nil {
-			return fmt.Errorf("failed to create subscription directory: %w", err)
-		}
-
-		// Create environment folders and generate policy files
 		for _, env := range sub.Environments {
-			logger.Info("Processing environment: %s in subscription %s", env.Name, subName)
-			envPath := filepath.Join(subPath, env.Name)
-			if err := os.MkdirAll(envPath, 0755); err != nil {
+			// Create environment directory
+			envDir := filepath.Join(policyFilesDir, subName, env.Name)
+			if err := os.MkdirAll(envDir, 0755); err != nil {
 				return fmt.Errorf("failed to create environment directory: %w", err)
 			}
 
-			// Generate app-specific policy files
+			// Create app-specific policy files
 			for _, app := range apps {
-				// Generate app-specific policy file
-				policyFilePath := filepath.Join(envPath, fmt.Sprintf("%s.policy.xml", app))
-				policyContent := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
-<policies>
-  <inbound>
-    <base />
-    <!-- Add your policy rules here -->
-  </inbound>
-  <backend>
-    <base />
-  </backend>
-  <outbound>
-    <base />
-  </outbound>
-  <on-error>
-    <base />
-  </on-error>
-</policies>`)
-				if err := os.WriteFile(policyFilePath, []byte(policyContent), 0644); err != nil {
-					return fmt.Errorf("failed to write policy file: %w", err)
+				policyFilePath := filepath.Join(envDir, app+".policy.xml")
+				if err := createFile(policyFilePath, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n</configuration>"); err != nil {
+					return fmt.Errorf("failed to create policy file: %w", err)
 				}
 			}
 		}
+	}
+
+	// Generate policies.hcl file
+	policyData := templates.PolicyData{
+		ComponentName: compName,
+		StackName:     "main", // TODO: Get this from the stack config
+	}
+	policyContent, err := renderer.RenderTemplate("policies.hcl.tmpl", policyData)
+	if err != nil {
+		return fmt.Errorf("failed to render policies.hcl template: %w", err)
+	}
+
+	policyHCLPath := filepath.Join(policyFilesDir, "policies.hcl")
+	if err := createFile(policyHCLPath, policyContent); err != nil {
+		return fmt.Errorf("failed to create policies.hcl file: %w", err)
 	}
 
 	return nil

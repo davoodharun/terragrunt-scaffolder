@@ -8,12 +8,12 @@ include "component" {
 
 {{ if .HasAppSettings }}
 include "appsettings" {
-  path = "${get_repo_root()}/.infrastructure/app_settings_{{ .Component }}/appsettings.hcl"
+  path = "${get_repo_root()}/.infrastructure/config/{{.StackName}}/app_settings_{{ .Component }}/appsettings.hcl"
 }
 {{ end }}
 
 {{ if .HasPolicyFiles }}
 include "policy" {
-  path = "${get_repo_root()}/.infrastructure/policy_files_{{ .Component }}/policies.hcl"
+  path = "${get_repo_root()}/.infrastructure/config/{{.StackName}}/policy_files_{{ .Component }}/policies.hcl"
 }
 {{ end }} 
