@@ -46,17 +46,12 @@ locals {
 }
 
 terraform {
-  source = "{{ .Source }}"
+  source = "${get_repo_root()}/.infrastructure/_components/{{ .StackName }}/{{ .ComponentName }}"
 }
 
 {{ .DependencyBlocks }}
 
 inputs = {
-  name                = local.env_config.locals.{{ .ComponentName }}.name
-  resource_group_name = local.env_config.locals.{{ .ComponentName }}.resource_group_name
-  location            = local.env_config.locals.{{ .ComponentName }}.location
-  tags                = local.env_config.locals.{{ .ComponentName }}.tags
-
   # Resource identification
   name = local.resource_name
   resource_group_name = local.resource_group_name
