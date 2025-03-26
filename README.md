@@ -6,6 +6,7 @@ A tool to generate and manage Terragrunt infrastructure configurations for Azure
 
 ## Table of Contents
 - [Overview](#overview)
+  - [Assumptions](#assumptions-and-opinions)
 - [Quick Start](#quick-start)
 - [Prerequisites](#prerequisites)
 - [Provider Setup](#provider-setup)
@@ -33,6 +34,28 @@ A tool to generate and manage Terragrunt infrastructure configurations for Azure
 ## Overview
 
 Terragrunt-scaffolder (tgs) helps you create and manage infrastructure-as-code projects using Terraform and Terragrunt. It generates a consistent directory structure, configuration files, and naming conventions based on your project specifications.
+
+### Assumptions and Opinions
+
+This tool makes several key assumptions and follows specific opinions about infrastructure organization:
+
+1. **Azure-Only Implementation**
+   - Currently only works with Azure cloud provider
+   - Only supports Terraform modules that use the `azurerm` provider
+   - Resource naming and structure is Azure-specific
+
+2. **Opinionated Terragrunt Structure**
+   - Follows the folder structure pattern from [Gruntwork's terragrunt-infrastructure-live-example](https://github.com/gruntwork-io/terragrunt-infrastructure-live-example/blob/main/root.hcl)
+   - Uses a multi-account, multi-region, multi-environment structure:
+     ```
+     ├── account
+     │   ├── region
+     │   │   ├── environment
+     │   │   │   ├── component
+     ```
+   - Implements centralized configuration through root `terragrunt.hcl` files
+   - Enforces DRY (Don't Repeat Yourself) principles through Terragrunt's inheritance
+
 
 For a detailed understanding of how the tool works:
 - [Generation Process Documentation](GENERATION_PROCESS.md) - Learn about the complete generation process and code flow
