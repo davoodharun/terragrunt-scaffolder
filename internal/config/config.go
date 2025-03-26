@@ -74,13 +74,14 @@ type RegionComponent struct {
 
 // Component represents a component configuration
 type Component struct {
-	Source      string   `yaml:"source"`
-	Provider    string   `yaml:"provider"`
-	Version     string   `yaml:"version"`
-	Description string   `yaml:"description"`
-	Deps        []string `yaml:"deps"`
-	AppSettings bool     `yaml:"app_settings"`
-	PolicyFiles bool     `yaml:"policy_files"`
+	Source              string   `yaml:"source"`
+	Provider            string   `yaml:"provider"`
+	Version             string   `yaml:"version"`
+	Description         string   `yaml:"description"`
+	Deps                []string `yaml:"deps,omitempty"`
+	AppSettings         bool     `yaml:"app_settings,omitempty"`
+	PolicyFiles         bool     `yaml:"policy_files,omitempty"`
+	AdditionalResources []string `yaml:"additional_resources,omitempty"`
 }
 
 // ReadTGSConfig reads the TGS configuration file

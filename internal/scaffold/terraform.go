@@ -25,31 +25,149 @@ func generateTerraformFiles(compPath string, comp config.Component) error {
 		schema = nil
 	}
 
-	// Generate main.tf
-	var mainContent string
-	if schema != nil {
-		mainContent = generateMainTF(comp, schema)
-	} else {
-		mainContent = fmt.Sprintf(`
+	// Create a slice of all resources to generate
+	allResources := append([]string{comp.Source}, comp.AdditionalResources...)
+	var resourceContents []string
+	var outputContents []string
+
+	// Generate content for each resource
+	for _, resourceType := range allResources {
+		var resourceSchema struct {
+			Block struct {
+				Attributes map[string]SchemaAttribute `json:"attributes"`
+				BlockTypes map[string]struct {
+					Block struct {
+						Attributes map[string]SchemaAttribute `json:"attributes"`
+					} `json:"block"`
+					NestingMode string `json:"nesting_mode"`
+				} `json:"block_types"`
+			} `json:"block"`
+		}
+
+		// Try different provider keys
+		providerKeys := []string{
+			"registry.terraform.io/hashicorp/azurerm",
+			"hashicorp/azurerm",
+		}
+
+		var found bool
+		for _, key := range providerKeys {
+			if provider, ok := schema.ProviderSchema[key]; ok {
+				if rs, ok := provider.ResourceSchemas[resourceType]; ok {
+					resourceSchema = rs
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found {
+			logger.Warning("Schema not found for resource %s, generating basic resource", resourceType)
+			resourceContents = append(resourceContents, fmt.Sprintf(`
 resource "%s" "this" {
   name                = var.name
   resource_group_name = var.resource_group_name
   location            = var.location
 
   tags = var.tags
-}
+}`, resourceType))
+		} else {
+			var requiredAttributes []string
+			var optionalAttributes []string
+			var blocks []string
 
-output "id" {
+			// Add our common required fields first
+			commonFields := []string{
+				"  name                = var.name",
+				"  resource_group_name = var.resource_group_name",
+				"  location            = var.location",
+				"  tags                = var.tags",
+			}
+			requiredAttributes = append(requiredAttributes, commonFields...)
+
+			// Special handling for Redis Cache
+			isRedisCache := strings.Contains(resourceType, "redis_cache")
+
+			// Generate attribute assignments - separate required and optional
+			for name, attr := range resourceSchema.Block.Attributes {
+				if shouldSkipVariable(name, resourceType) {
+					continue
+				}
+
+				if attr.Required {
+					// Special handling for Redis Cache family attribute
+					if isRedisCache && name == "family" {
+						requiredAttributes = append(requiredAttributes, fmt.Sprintf("  %s = coalesce(var.family, \"C\")", name))
+					} else {
+						requiredAttributes = append(requiredAttributes, fmt.Sprintf("  %s = var.%s", name, name))
+					}
+				} else if attr.Optional && !attr.Computed {
+					// Only include purely optional fields (not computed) as comments
+					optionalAttributes = append(optionalAttributes, fmt.Sprintf("  # %s = var.%s", name, name))
+				}
+			}
+
+			// Generate dynamic blocks - separate required and optional
+			for blockName, blockType := range resourceSchema.Block.BlockTypes {
+				var requiredBlockAttrs []string
+				var optionalBlockAttrs []string
+
+				for attrName, attr := range blockType.Block.Attributes {
+					if attr.Required {
+						requiredBlockAttrs = append(requiredBlockAttrs, fmt.Sprintf("      %s = %s.value.%s", attrName, blockName, attrName))
+					} else if attr.Optional && !attr.Computed {
+						optionalBlockAttrs = append(optionalBlockAttrs, fmt.Sprintf("      # %s = %s.value.%s", attrName, blockName, attrName))
+					}
+				}
+
+				if len(requiredBlockAttrs) > 0 || len(optionalBlockAttrs) > 0 {
+					block := fmt.Sprintf(`
+  dynamic "%s" {
+    for_each = var.%s
+    content {
+%s
+%s
+    }
+  }`, blockName, blockName,
+						strings.Join(requiredBlockAttrs, "\n"),
+						strings.Join(optionalBlockAttrs, "\n"))
+					blocks = append(blocks, block)
+				}
+			}
+
+			// Combine all attributes with optional ones as comments
+			allAttributes := append(requiredAttributes, optionalAttributes...)
+
+			resourceContents = append(resourceContents, fmt.Sprintf(`
+resource "%s" "this" {
+%s
+
+%s
+
+  lifecycle {
+    ignore_changes = [
+      tags["CreatedDate"],
+      tags["Environment"]
+    ]
+  }
+}`, resourceType, strings.Join(allAttributes, "\n"), strings.Join(blocks, "\n")))
+		}
+
+		// Add outputs for each resource
+		outputContents = append(outputContents, fmt.Sprintf(`
+output "%s_id" {
   value = resource.%s.this.id
   description = "The ID of the %s"
 }
 
-output "name" {
+output "%s_name" {
   value = resource.%s.this.name
   description = "The name of the %s"
-}`, comp.Source, comp.Source, comp.Source, comp.Source, comp.Source)
+}`, resourceType, resourceType, resourceType, resourceType, resourceType, resourceType))
 	}
 
+	// Generate main.tf with all resources
+	mainContent := strings.Join(resourceContents, "\n") + strings.Join(outputContents, "\n")
 	mainPath := filepath.Join(compPath, "main.tf")
 	if err := createFile(mainPath, mainContent); err != nil {
 		return fmt.Errorf("failed to create main.tf: %w", err)
@@ -369,66 +487,72 @@ variable "tags" {
   default     = {}
 }`}
 
-	// Try different provider keys
-	providerKeys := []string{
-		"registry.terraform.io/hashicorp/azurerm",
-		"hashicorp/azurerm",
-	}
+	// Create a slice of all resources to generate variables for
+	allResources := append([]string{comp.Source}, comp.AdditionalResources...)
 
-	var resourceSchema struct {
-		Block struct {
-			Attributes map[string]SchemaAttribute `json:"attributes"`
-			BlockTypes map[string]struct {
-				Block struct {
-					Attributes map[string]SchemaAttribute `json:"attributes"`
-				} `json:"block"`
-				NestingMode string `json:"nesting_mode"`
-			} `json:"block_types"`
-		} `json:"block"`
-	}
+	// Generate variables for each resource
+	for _, resourceType := range allResources {
+		var resourceSchema struct {
+			Block struct {
+				Attributes map[string]SchemaAttribute `json:"attributes"`
+				BlockTypes map[string]struct {
+					Block struct {
+						Attributes map[string]SchemaAttribute `json:"attributes"`
+					} `json:"block"`
+					NestingMode string `json:"nesting_mode"`
+				} `json:"block_types"`
+			} `json:"block"`
+		}
 
-	var found bool
-	for _, key := range providerKeys {
-		if provider, ok := schema.ProviderSchema[key]; ok {
-			if rs, ok := provider.ResourceSchemas[comp.Source]; ok {
-				resourceSchema = rs
-				found = true
-				break
+		// Try different provider keys
+		providerKeys := []string{
+			"registry.terraform.io/hashicorp/azurerm",
+			"hashicorp/azurerm",
+		}
+
+		var found bool
+		for _, key := range providerKeys {
+			if provider, ok := schema.ProviderSchema[key]; ok {
+				if rs, ok := provider.ResourceSchemas[resourceType]; ok {
+					resourceSchema = rs
+					found = true
+					break
+				}
 			}
 		}
-	}
 
-	if found {
-		// Add resource-specific variables based on schema
-		for name, attr := range resourceSchema.Block.Attributes {
-			// Skip common variables and computed fields
-			if shouldSkipVariable(name, comp.Source) {
-				continue
-			}
+		if found {
+			// Add resource-specific variables based on schema
+			for name, attr := range resourceSchema.Block.Attributes {
+				// Skip common variables and computed fields
+				if shouldSkipVariable(name, resourceType) {
+					continue
+				}
 
-			// Skip computed-only fields
-			if attr.Computed && !attr.Required && !attr.Optional {
-				continue
-			}
+				// Skip computed-only fields
+				if attr.Computed && !attr.Required && !attr.Optional {
+					continue
+				}
 
-			// Generate smart defaults based on attribute name and type
-			defaultValue := generateSmartDefault(name, attr)
+				// Generate smart defaults based on attribute name and type
+				defaultValue := generateSmartDefault(name, attr)
 
-			varBlock := fmt.Sprintf(`
+				varBlock := fmt.Sprintf(`
 variable "%s" {
   type        = %s
   description = "%s"
   %s
 }`, name,
-				convertType(attr.Type),
-				sanitizeDescription(attr.Description),
-				defaultValue)
-			variables = append(variables, varBlock)
-		}
+					convertType(attr.Type),
+					sanitizeDescription(attr.Description),
+					defaultValue)
+				variables = append(variables, varBlock)
+			}
 
-		// Handle nested blocks
-		for blockName, blockType := range resourceSchema.Block.BlockTypes {
-			variables = append(variables, generateNestedBlockVariable(blockName, blockType))
+			// Handle nested blocks
+			for blockName, blockType := range resourceSchema.Block.BlockTypes {
+				variables = append(variables, generateNestedBlockVariable(blockName, blockType))
+			}
 		}
 	}
 
