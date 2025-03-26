@@ -7,3 +7,4 @@ tgs.exe
 .azuredevops/
 .infrastructure/
 .azure-pipelines/
+scaffolding/

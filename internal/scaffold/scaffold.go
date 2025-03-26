@@ -155,6 +155,7 @@ func Generate() error {
 
 	// First pass: collect all unique components and their configurations by stack
 	stackComponents := make(map[string]map[string]config.Component)
+	stackArchitectures := make(map[string]config.ArchitectureConfig)
 	for _, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
 			stackName := "main"
@@ -176,6 +177,9 @@ func Generate() error {
 			for compName, comp := range mainConfig.Stack.Components {
 				stackComponents[stackName][compName] = comp
 			}
+
+			// Store the architecture configuration
+			stackArchitectures[stackName] = mainConfig.Stack.Architecture
 		}
 	}
 
@@ -192,8 +196,9 @@ func Generate() error {
 
 		mainConfig := &config.MainConfig{
 			Stack: config.StackConfig{
-				Name:       stackName,
-				Components: components,
+				Name:         stackName,
+				Components:   components,
+				Architecture: stackArchitectures[stackName],
 			},
 		}
 
@@ -250,15 +255,15 @@ func ReadMainConfig(stackName string) (*config.MainConfig, error) {
 	stackPath := filepath.Join(".tgs", "stacks", fmt.Sprintf("%s.yaml", stackName))
 	data, err := os.ReadFile(stackPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read stack config file: %w", err)
+		return nil, fmt.Errorf("failed to read stack config: %w", err)
 	}
 
-	var config config.MainConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal stack config: %w", err)
+	var mainConfig config.MainConfig
+	if err := yaml.Unmarshal(data, &mainConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse stack config: %w", err)
 	}
 
-	return &config, nil
+	return &mainConfig, nil
 }
 
 func createFile(path string, content string) error {

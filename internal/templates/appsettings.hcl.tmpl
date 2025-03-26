@@ -1,0 +1,26 @@
+locals {
+  # Get the current app name from the directory structure
+  app_name = try(basename(dirname(get_terragrunt_dir())), basename(get_terragrunt_dir()), "")
+
+  # Read subscription and environment variables from parent configs
+  subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
+  environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
+
+  # Define paths to settings files
+  settings_paths = {
+    global = "${get_repo_root()}/.infrastructure/app_settings_{{ .ComponentName }}/global.appsettings.json"
+    env    = "${get_repo_root()}/.infrastructure/app_settings_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.environment_vars.locals.environment_name}.appsettings.json"
+    app    = "${get_repo_root()}/.infrastructure/app_settings_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.app_name}.appsettings.json"
+  }
+
+  # Read and merge settings
+  appsettings = merge(
+    jsondecode(templatefile(local.settings_paths.global)),
+    jsondecode(templatefile(local.settings_paths.env)),
+    jsondecode(templatefile(local.settings_paths.app))
+  )
+}
+
+inputs = {
+  app_settings = local.appsettings
+} 

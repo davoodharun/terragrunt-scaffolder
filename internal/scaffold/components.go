@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,6 +39,20 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 
 	// Track validated components to avoid duplicate messages
 	validatedComponents := make(map[string]bool)
+
+	// Get all environments for this stack
+	var environments []string
+	for _, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			stackToCheck := "main"
+			if env.Stack != "" {
+				stackToCheck = env.Stack
+			}
+			if stackToCheck == mainConfig.Stack.Name {
+				environments = append(environments, env.Name)
+			}
+		}
+	}
 
 	// Generate component files
 	for compName, comp := range mainConfig.Stack.Components {
@@ -86,43 +101,69 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 			return fmt.Errorf("failed to create component.hcl: %w", err)
 		}
 
-		// Validate component structure
-		if err := ValidateComponentStructure(componentPath); err != nil {
-			return fmt.Errorf("component structure validation failed for %s: %w", compName, err)
-		}
+		// Generate app settings structure if enabled
+		if comp.AppSettings {
+			// Get apps for this component from the architecture config
+			var apps []string
+			appMap := make(map[string]bool) // Use map to deduplicate apps
 
-		// Read TGS config to find valid environments for this stack
-		tgsConfig, err := config.ReadTGSConfig()
-		if err != nil {
-			return fmt.Errorf("failed to read TGS config: %w", err)
-		}
+			// Ensure we have a valid architecture configuration
+			if mainConfig.Stack.Architecture.Regions == nil {
+				logger.Warning("No regions defined in architecture configuration for component %s", compName)
+				return nil
+			}
 
-		// Find any environment that uses this stack
-		var envConfigPath string
-		for _, sub := range tgsConfig.Subscriptions {
-			for _, env := range sub.Environments {
-				stackToCheck := "main"
-				if env.Stack != "" {
-					stackToCheck = env.Stack
-				}
-				if stackToCheck == mainConfig.Stack.Name {
-					envConfigPath = filepath.Join(infraPath, "config", mainConfig.Stack.Name, fmt.Sprintf("%s.hcl", env.Name))
-					if _, err := os.Stat(envConfigPath); err == nil {
-						// Found a valid environment config file
-						break
+			for _, regionComps := range mainConfig.Stack.Architecture.Regions {
+				for _, regionComp := range regionComps {
+					if regionComp.Component == compName {
+						for _, app := range regionComp.Apps {
+							if !appMap[app] {
+								apps = append(apps, app)
+								appMap[app] = true
+							}
+						}
 					}
 				}
 			}
-			if envConfigPath != "" {
-				break
+
+			if err := generateAppSettingsStructure(compName, infraPath, tgsConfig, apps); err != nil {
+				return fmt.Errorf("failed to generate app settings structure: %w", err)
 			}
 		}
 
-		// If we found a valid environment config, validate against it
-		if envConfigPath != "" {
-			if err := ValidateComponentVariables(componentPath, envConfigPath); err != nil {
-				return fmt.Errorf("component variables validation failed for %s: %w", compName, err)
+		// Generate policy files structure if enabled
+		if comp.PolicyFiles {
+			// Get apps for this component from the architecture config
+			var apps []string
+			appMap := make(map[string]bool) // Use map to deduplicate apps
+
+			// Ensure we have a valid architecture configuration
+			if mainConfig.Stack.Architecture.Regions == nil {
+				logger.Warning("No regions defined in architecture configuration for component %s", compName)
+				return nil
 			}
+
+			for _, regionComps := range mainConfig.Stack.Architecture.Regions {
+				for _, regionComp := range regionComps {
+					if regionComp.Component == compName {
+						for _, app := range regionComp.Apps {
+							if !appMap[app] {
+								apps = append(apps, app)
+								appMap[app] = true
+							}
+						}
+					}
+				}
+			}
+
+			if err := generatePolicyFilesStructure(compName, infraPath, tgsConfig, apps); err != nil {
+				return fmt.Errorf("failed to generate policy files structure: %w", err)
+			}
+		}
+
+		// Validate component structure
+		if err := ValidateComponentStructure(componentPath); err != nil {
+			return fmt.Errorf("component structure validation failed for %s: %w", compName, err)
 		}
 
 		logger.Success("Generated and validated component: %s", compName)
@@ -385,4 +426,179 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 	}
 
 	return strings.Join(blocks, "\n")
+}
+
+// generateAppSettingsStructure creates the app settings folder structure for a component
+func generateAppSettingsStructure(compName, infraPath string, tgsConfig *config.TGSConfig, apps []string) error {
+	logger.Info("Generating app settings structure for component %s with apps: %v", compName, apps)
+
+	// Create the app settings folder for this component
+	appSettingsPath := filepath.Join(infraPath, fmt.Sprintf("app_settings_%s", compName))
+	if err := os.MkdirAll(appSettingsPath, 0755); err != nil {
+		return fmt.Errorf("failed to create app settings directory: %w", err)
+	}
+
+	// Initialize template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to initialize template renderer: %w", err)
+	}
+
+	// Generate global app settings file in the root
+	globalSettingsPath := filepath.Join(appSettingsPath, "global.appsettings.json")
+	globalSettings := map[string]interface{}{
+		"component": compName,
+		"apps":      apps,
+	}
+	globalContent, err := json.MarshalIndent(globalSettings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal global settings: %w", err)
+	}
+	if err := os.WriteFile(globalSettingsPath, globalContent, 0644); err != nil {
+		return fmt.Errorf("failed to write global settings file: %w", err)
+	}
+	logger.Info("Created global settings file: %s", globalSettingsPath)
+
+	// Generate appsettings.hcl file in the root
+	appSettingsHclPath := filepath.Join(appSettingsPath, "appsettings.hcl")
+	appSettingsData := &templates.AppSettingsData{
+		ComponentName: compName,
+	}
+	appSettingsHcl, err := renderer.RenderTemplate("appsettings.hcl.tmpl", appSettingsData)
+	if err != nil {
+		return fmt.Errorf("failed to render appsettings.hcl template: %w", err)
+	}
+	if err := os.WriteFile(appSettingsHclPath, []byte(appSettingsHcl), 0644); err != nil {
+		return fmt.Errorf("failed to write appsettings.hcl file: %w", err)
+	}
+	logger.Info("Created appsettings.hcl file: %s", appSettingsHclPath)
+
+	// Create subscription folders and their environment folders
+	for subName, sub := range tgsConfig.Subscriptions {
+		logger.Info("Processing subscription: %s", subName)
+		subPath := filepath.Join(appSettingsPath, subName)
+		if err := os.MkdirAll(subPath, 0755); err != nil {
+			return fmt.Errorf("failed to create subscription directory: %w", err)
+		}
+
+		// Create environment folders and generate app settings files
+		for _, env := range sub.Environments {
+			logger.Info("Processing environment: %s in subscription %s", env.Name, subName)
+			envPath := filepath.Join(subPath, env.Name)
+			if err := os.MkdirAll(envPath, 0755); err != nil {
+				return fmt.Errorf("failed to create environment directory: %w", err)
+			}
+
+			// Generate environment-level app settings file
+			envSettingsPath := filepath.Join(envPath, fmt.Sprintf("%s.appsettings.json", env.Name))
+			envSettings := map[string]interface{}{
+				"environment":  env.Name,
+				"subscription": subName,
+				"component":    compName,
+			}
+			envContent, err := json.MarshalIndent(envSettings, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal environment settings: %w", err)
+			}
+			if err := os.WriteFile(envSettingsPath, envContent, 0644); err != nil {
+				return fmt.Errorf("failed to write environment settings file: %w", err)
+			}
+
+			// Generate app-specific app settings files
+			for _, app := range apps {
+				// Generate app-specific app settings file
+				appSettingsPath := filepath.Join(envPath, fmt.Sprintf("%s.appsettings.json", app))
+				settings := map[string]interface{}{
+					"name":         app,
+					"environment":  env.Name,
+					"subscription": subName,
+				}
+				content, err := json.MarshalIndent(settings, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal app settings: %w", err)
+				}
+				if err := os.WriteFile(appSettingsPath, content, 0644); err != nil {
+					return fmt.Errorf("failed to write app settings file: %w", err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// generatePolicyFilesStructure creates the policy files folder structure for a component
+func generatePolicyFilesStructure(compName, infraPath string, tgsConfig *config.TGSConfig, apps []string) error {
+	logger.Info("Generating policy files structure for component %s with apps: %v", compName, apps)
+
+	// Create the policy files folder for this component
+	policyFilesPath := filepath.Join(infraPath, fmt.Sprintf("policy_files_%s", compName))
+	if err := os.MkdirAll(policyFilesPath, 0755); err != nil {
+		return fmt.Errorf("failed to create policy files directory: %w", err)
+	}
+
+	// Initialize template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to initialize template renderer: %w", err)
+	}
+
+	// Generate policies.hcl file in the root
+	policiesHclPath := filepath.Join(policyFilesPath, "policies.hcl")
+	policiesData := &templates.AppSettingsData{
+		ComponentName: compName,
+	}
+	policiesHcl, err := renderer.RenderTemplate("policies.hcl.tmpl", policiesData)
+	if err != nil {
+		return fmt.Errorf("failed to render policies.hcl template: %w", err)
+	}
+	if err := os.WriteFile(policiesHclPath, []byte(policiesHcl), 0644); err != nil {
+		return fmt.Errorf("failed to write policies.hcl file: %w", err)
+	}
+	logger.Info("Created policies.hcl file: %s", policiesHclPath)
+
+	// Create subscription folders and their environment folders
+	for subName, sub := range tgsConfig.Subscriptions {
+		logger.Info("Processing subscription: %s", subName)
+		subPath := filepath.Join(policyFilesPath, subName)
+		if err := os.MkdirAll(subPath, 0755); err != nil {
+			return fmt.Errorf("failed to create subscription directory: %w", err)
+		}
+
+		// Create environment folders and generate policy files
+		for _, env := range sub.Environments {
+			logger.Info("Processing environment: %s in subscription %s", env.Name, subName)
+			envPath := filepath.Join(subPath, env.Name)
+			if err := os.MkdirAll(envPath, 0755); err != nil {
+				return fmt.Errorf("failed to create environment directory: %w", err)
+			}
+
+			// Generate app-specific policy files
+			for _, app := range apps {
+				// Generate app-specific policy file
+				policyFilePath := filepath.Join(envPath, fmt.Sprintf("%s.policy.xml", app))
+				policyContent := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<policies>
+  <inbound>
+    <base />
+    <!-- Add your policy rules here -->
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>`)
+				if err := os.WriteFile(policyFilePath, []byte(policyContent), 0644); err != nil {
+					return fmt.Errorf("failed to write policy file: %w", err)
+				}
+			}
+		}
+	}
+
+	return nil
 }

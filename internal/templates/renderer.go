@@ -9,7 +9,7 @@ import (
 	"text/template"
 )
 
-//go:embed components/* environment/*
+//go:embed components/* environment/* *.tmpl
 var templateFS embed.FS
 
 // TemplateRenderer handles loading and rendering of templates
@@ -34,6 +34,8 @@ func NewRenderer() (*TemplateRenderer, error) {
 		"environment/subscription.hcl.tmpl",
 		"environment/root.hcl.tmpl",
 		"environment/global.hcl.tmpl",
+		"appsettings.hcl.tmpl",
+		"policies.hcl.tmpl",
 	}
 
 	for _, tmpl := range templates {
@@ -103,6 +105,7 @@ type EnvironmentTemplateData struct {
 	RemoteStateStorageAccount string
 	StackName                 string
 	Component                 string
+	HasAppSettings            bool
 }
 
 // GlobalConfigData represents the data needed for global configuration templates

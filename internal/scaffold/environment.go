@@ -21,6 +21,8 @@ type EnvironmentTemplateData struct {
 	RemoteStateStorageAccount string
 	StackName                 string
 	Component                 string
+	HasAppSettings            bool
+	HasPolicyFiles            bool
 }
 
 func generateEnvironment(subscription, region string, envName string, components []config.RegionComponent, infraPath string) error {
@@ -99,9 +101,25 @@ func generateEnvironment(subscription, region string, envName string, components
 			return fmt.Errorf("failed to create component directory: %w", err)
 		}
 
+		// Read the stack configuration to check if app_settings is enabled
+		mainConfig, err := ReadMainConfig(stackName)
+		if err != nil {
+			return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+		}
+
+		// Check if the component has app_settings or policy_files enabled
+		hasAppSettings := false
+		hasPolicyFiles := false
+		if compConfig, ok := mainConfig.Stack.Components[comp.Component]; ok {
+			hasAppSettings = compConfig.AppSettings
+			hasPolicyFiles = compConfig.PolicyFiles
+		}
+
 		compData := EnvironmentTemplateData{
-			StackName: stackName,
-			Component: comp.Component,
+			StackName:      stackName,
+			Component:      comp.Component,
+			HasAppSettings: hasAppSettings,
+			HasPolicyFiles: hasPolicyFiles,
 		}
 
 		if len(comp.Apps) > 0 {

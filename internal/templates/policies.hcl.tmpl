@@ -1,0 +1,15 @@
+locals {
+  # Get the current app name from the directory structure
+  app_name = try(basename(dirname(get_terragrunt_dir())), basename(get_terragrunt_dir()), "")
+
+  # Read subscription and environment variables from parent configs
+  subscription_vars = read_terragrunt_config(find_in_parent_folders("subscription.hcl"))
+  environment_vars = read_terragrunt_config(find_in_parent_folders("environment.hcl"))
+
+  # Define path to policy file
+  policy_path = "${get_repo_root()}/.infrastructure/policy_files_{{ .ComponentName }}/${local.subscription_vars.locals.subscription_name}/${local.environment_vars.locals.environment_name}/${local.app_name}.policy.xml"
+}
+
+inputs = {
+  policy_file = file(local.policy_path)
+} 

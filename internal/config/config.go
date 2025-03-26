@@ -75,10 +75,12 @@ type RegionComponent struct {
 // Component represents a component configuration
 type Component struct {
 	Source      string   `yaml:"source"`
-	Deps        []string `yaml:"deps"`
 	Provider    string   `yaml:"provider"`
 	Version     string   `yaml:"version"`
 	Description string   `yaml:"description"`
+	Deps        []string `yaml:"deps"`
+	AppSettings bool     `yaml:"app_settings"`
+	PolicyFiles bool     `yaml:"policy_files"`
 }
 
 // ReadTGSConfig reads the TGS configuration file
@@ -160,6 +162,8 @@ func ReadMainConfig(stackName string) (*MainConfig, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse stack config: %w", err)
 	}
+
+	// Log the architecture configuratio
 
 	return &config, nil
 }
