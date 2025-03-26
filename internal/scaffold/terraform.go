@@ -51,12 +51,14 @@ func generateTerraformFiles(compPath string, comp config.Component) error {
 		}
 
 		var found bool
-		for _, key := range providerKeys {
-			if provider, ok := schema.ProviderSchema[key]; ok {
-				if rs, ok := provider.ResourceSchemas[resourceType]; ok {
-					resourceSchema = rs
-					found = true
-					break
+		if schema != nil && schema.ProviderSchema != nil {
+			for _, key := range providerKeys {
+				if provider, ok := schema.ProviderSchema[key]; ok {
+					if rs, ok := provider.ResourceSchemas[resourceType]; ok {
+						resourceSchema = rs
+						found = true
+						break
+					}
 				}
 			}
 		}
