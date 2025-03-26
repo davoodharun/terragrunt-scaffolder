@@ -477,9 +477,9 @@ set -e
 
 # Set the working directory
 if [ -n "$1" ]; then
-  cd .infrastructure/$2/$3/$4/$5/$1
+  cd .infrastructure/architecture/$2/$3/$4/$5/$1
 else
-  cd .infrastructure/$2/$3/$4/$5
+  cd .infrastructure/architecture/$2/$3/$4/$5
 fi
 
 # Always run init

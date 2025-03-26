@@ -373,14 +373,14 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 			if app == "" || app == "{app}" {
 				if app == "{app}" {
 					// App-specific dependency using current app
-					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/${local.subscription_name}/%s/${local.environment_name}/%s/${local.app_name}", region, component)
+					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_name}/%s/${local.environment_name}/%s/${local.app_name}", region, component)
 				} else {
 					// Component-level dependency
-					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/${local.subscription_name}/%s/${local.environment_name}/%s", region, component)
+					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_name}/%s/${local.environment_name}/%s", region, component)
 				}
 			} else {
 				// App-specific dependency with fixed app name
-				configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/${local.subscription_name}/%s/${local.environment_name}/%s/%s", region, component, app)
+				configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_name}/%s/${local.environment_name}/%s/%s", region, component, app)
 				depName = fmt.Sprintf("%s_%s", component, app)
 			}
 
@@ -403,7 +403,7 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 			blocks = append(blocks, block)
 		} else {
 			// Handle analyzed dependencies (component name only)
-			configPath := fmt.Sprintf("${get_repo_root()}/.infrastructure/${local.subscription_name}/${local.region_vars.locals.region_name}/${local.environment_vars.locals.environment_name}/%s", dep)
+			configPath := fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_name}/${local.region_vars.locals.region_name}/${local.environment_vars.locals.environment_name}/%s", dep)
 
 			// Ensure unique dependency name
 			depName := dep

@@ -14,6 +14,6 @@ include "appsettings" {
 
 {{ if .HasPolicyFiles }}
 include "policy" {
-  path = "${get_repo_root()}/.infrastructure/policy_files_{{ .Component }}/policy.hcl"
+  path = "${get_repo_root()}/.infrastructure/policy_files_{{ .Component }}/policies.hcl"
 }
 {{ end }} 
