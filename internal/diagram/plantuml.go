@@ -8,6 +8,7 @@ import (
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/scaffold"
 )
 
 // Azure resource type to PlantUML sprite mapping
@@ -237,24 +238,7 @@ func generatePlantUMLDiagram(stackName string, tgsConfig *config.TGSConfig, envN
 
 // Helper function to get region prefix
 func getRegionPrefix(region string) string {
-	regionPrefixMap := map[string]string{
-		"eastus":        "E",
-		"eastus2":       "E2",
-		"westus":        "W",
-		"westus2":       "W2",
-		"centralus":     "C",
-		"northeurope":   "NE",
-		"westeurope":    "WE",
-		"uksouth":       "UKS",
-		"ukwest":        "UKW",
-		"southeastasia": "SEA",
-		"eastasia":      "EA",
-	}
-
-	if prefix, ok := regionPrefixMap[region]; ok {
-		return prefix
-	}
-	return strings.ToUpper(region[0:1])
+	return scaffold.GetRegionPrefix(region)
 }
 
 // Helper function to get environment prefix

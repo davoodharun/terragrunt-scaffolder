@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
+	"github.com/davoodharun/terragrunt-scaffolder/internal/scaffold"
 )
 
 // Component represents a component in the infrastructure
@@ -246,8 +247,9 @@ stages:
 
 	// Add stages for each region's components
 	for region, components := range regionComponents {
-		template += fmt.Sprintf(`  # Region: %s
-`, region)
+		regionPrefix := scaffold.GetRegionPrefix(region)
+		template += fmt.Sprintf(`  # Region: %s (%s)
+`, region, regionPrefix)
 		for _, comp := range components {
 			componentConfig := mainConfig.Stack.Components[comp]
 
@@ -303,7 +305,7 @@ stages:
 			if len(apps) > 0 {
 				for _, app := range apps {
 					stageName := fmt.Sprintf("%s_%s_%s", region, comp, app)
-					displayName := fmt.Sprintf("%s/%s/%s", region, comp, app)
+					displayName := fmt.Sprintf("%s/%s/%s", regionPrefix, comp, app)
 
 					// Add dependencies
 					var deps []string
@@ -347,7 +349,7 @@ stages:
 			} else {
 				// Create single stage for component without apps
 				stageName := fmt.Sprintf("%s_%s", region, comp)
-				displayName := fmt.Sprintf("%s/%s", region, comp)
+				displayName := fmt.Sprintf("%s/%s", regionPrefix, comp)
 
 				// Add dependencies
 				var deps []string

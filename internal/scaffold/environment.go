@@ -74,7 +74,7 @@ func generateEnvironment(subscription, region string, envName string, components
 
 	regionData := EnvironmentTemplateData{
 		Region:       region,
-		RegionPrefix: getRegionPrefix(region),
+		RegionPrefix: GetRegionPrefix(region),
 	}
 	if err := templates.Render("environment/region.hcl.tmpl", filepath.Join(regionPath, "region.hcl"), regionData); err != nil {
 		return fmt.Errorf("failed to create region.hcl: %w", err)
@@ -206,7 +206,7 @@ func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) e
 
 			for region := range mainConfig.Stack.Architecture.Regions {
 				envConfig.Regions[region] = templates.RegionConfig{
-					Prefix: getRegionPrefix(region),
+					Prefix: GetRegionPrefix(region),
 				}
 			}
 

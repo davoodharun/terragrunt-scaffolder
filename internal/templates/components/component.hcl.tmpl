@@ -23,7 +23,7 @@ locals {
   provider_version = "{{ .Version }}"
 
   # Get the directory name as the app name, defaulting to empty string if at component root
-  app_name = try(basename(dirname(get_terragrunt_dir())), basename(get_terragrunt_dir()), "")
+  app_name = try(basename(get_terragrunt_dir()), "")
 
   # Resource type abbreviation
   resource_type = "{{ .ResourceType }}"

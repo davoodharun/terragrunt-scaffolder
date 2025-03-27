@@ -314,7 +314,8 @@ func getStacksDir() string {
 	return stacksDir
 }
 
-func getRegionPrefix(region string) string {
+// GetRegionPrefix returns a prefix for a region
+func GetRegionPrefix(region string) string {
 	regionPrefixMap := map[string]string{
 		"eastus":        "E",
 		"eastus2":       "E2",
