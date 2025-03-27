@@ -233,9 +233,31 @@ parameters:
       - plan
       - apply
       - destroy
-
-stages:
 `, stackName)
+
+	// Add component-specific parameters for apps
+	for comp := range mainConfig.Stack.Components {
+		var compApps []string
+		for _, components := range mainConfig.Stack.Architecture.Regions {
+			for _, rc := range components {
+				if rc.Component == comp {
+					compApps = rc.Apps
+					break
+				}
+			}
+			if len(compApps) > 0 {
+				break
+			}
+		}
+		if len(compApps) > 0 {
+			template += fmt.Sprintf(`  - name: %s_apps
+    type: object
+    default: %s
+`, comp, formatAppsList(compApps))
+		}
+	}
+
+	template += "\nstages:\n"
 
 	// Group components by region
 	regionComponents := make(map[string][]string)
@@ -303,49 +325,31 @@ stages:
 
 			// If component has apps, create a stage for each app
 			if len(apps) > 0 {
-				for _, app := range apps {
-					stageName := fmt.Sprintf("%s_%s_%s", region, comp, app)
-					displayName := fmt.Sprintf("%s/%s/%s", regionPrefix, comp, app)
+				displayName := fmt.Sprintf("%s/%s", regionPrefix, comp)
+				stageName := fmt.Sprintf("%s_%s", region, comp)
 
-					// Add dependencies
-					var deps []string
-					for _, dep := range componentConfig.Deps {
-						if depStage := getDependencies(dep, app); depStage != "" {
-							deps = append(deps, depStage)
-						}
+				// Add dependencies
+				var deps []string
+				for _, dep := range componentConfig.Deps {
+					if depStage := getDependencies(dep, ""); depStage != "" {
+						deps = append(deps, depStage)
 					}
-
-					template += fmt.Sprintf(`  - stage: '%s'
-    displayName: '%s'
-`, stageName, displayName)
-
-					// Always add dependsOn section
-					if len(deps) > 0 {
-						template += "    dependsOn:\n"
-						for _, dep := range deps {
-							template += fmt.Sprintf("      - %s\n", dep)
-						}
-					} else {
-						template += "    dependsOn: []\n"
-					}
-
-					template += fmt.Sprintf(`    jobs:
-      - job: Deploy
-        displayName: 'Deploy Infrastructure (${{ parameters.runMode }})'
-        pool:
-          vmImage: ubuntu-latest
-        steps:
-          - template: component-deploy.yml
-            parameters:
-              component: '%s'
-              region: '%s'
-              environment: ${{ parameters.environment }}
-              subscription: ${{ parameters.subscription }}
-              runMode: ${{ parameters.runMode }}
-              app: '%s'
-
-`, comp, region, app)
 				}
+
+				template += fmt.Sprintf(`  - ${{ each app in parameters.%s_apps }}:
+    - template: app-deploy.yml
+      parameters:
+        component: '%s'
+        region: '%s'
+        environment: ${{ parameters.environment }}
+        subscription: ${{ parameters.subscription }}
+        runMode: ${{ parameters.runMode }}
+        app: ${{ app }}
+        displayName: '%s/${{ app }}'
+        dependsOn: %s
+        stageName: '%s_${{ app }}'
+
+`, comp, comp, region, displayName, formatDependencies(deps), stageName)
 			} else {
 				// Create single stage for component without apps
 				stageName := fmt.Sprintf("%s_%s", region, comp)
@@ -495,7 +499,7 @@ case "$6" in
   "apply")
     terragrunt plan
     terragrunt apply --auto-approve
-    terragrunt output
+	terragrunt output
     ;;
   "destroy")
     terragrunt destroy --auto-approve
@@ -511,7 +515,7 @@ esac`
 	}
 
 	// Generate component deployment template
-	template := `parameters:
+	componentTemplate := `parameters:
   - name: component
     type: string
   - name: region
@@ -561,7 +565,62 @@ steps:
       ARM_TENANT_ID: $(ARM_TENANT_ID)
 `
 
-	return os.WriteFile(".azure-pipelines/templates/component-deploy.yml", []byte(template), 0644)
+	if err := os.WriteFile(".azure-pipelines/templates/component-deploy.yml", []byte(componentTemplate), 0644); err != nil {
+		return fmt.Errorf("failed to create component deployment template: %w", err)
+	}
+
+	// Generate app deployment template
+	appTemplate := `parameters:
+  - name: component
+    type: string
+  - name: region
+    type: string
+  - name: environment
+    type: string
+  - name: subscription
+    type: string
+  - name: app
+    type: string
+  - name: runMode
+    type: string
+    default: plan
+    values:
+      - plan
+      - apply
+      - destroy
+  - name: displayName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+  - name: stageName
+    type: string
+
+stages:
+  - stage: ${{ parameters.stageName }}
+    displayName: ${{ parameters.displayName }}
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: Deploy
+        displayName: 'Deploy Infrastructure (${{ parameters.runMode }})'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - template: component-deploy.yml
+            parameters:
+              component: ${{ parameters.component }}
+              region: ${{ parameters.region }}
+              environment: ${{ parameters.environment }}
+              subscription: ${{ parameters.subscription }}
+              runMode: ${{ parameters.runMode }}
+              app: ${{ parameters.app }}
+`
+
+	if err := os.WriteFile(".azure-pipelines/templates/app-deploy.yml", []byte(appTemplate), 0644); err != nil {
+		return fmt.Errorf("failed to create app deployment template: %w", err)
+	}
+
+	return nil
 }
 
 // generateEnvironmentPipeline generates a pipeline for a specific environment
@@ -593,7 +652,7 @@ func generateEnvironmentPipeline(envName string, components []Component) error {
 	}
 
 	// Create pipeline content
-	pipeline := fmt.Sprintf(`# Pipeline for %s environment
+	pipeline := `# Pipeline for ` + envName + ` environment
 trigger: none
 pr: none
 
@@ -608,9 +667,9 @@ parameters:
 
 variables:
   - name: environment
-    value: '%s'
+    value: '` + envName + `'
   - name: subscription
-    value: '%s'
+    value: '` + sub + `'
   - group: terraform-variables
   - name: terraform_version
     value: '1.11.2'
@@ -618,12 +677,12 @@ variables:
     value: 'v0.69.10'
 
 stages:
-  - template: templates/stack-%s.yml
+  - template: templates/stack-` + stackName + `.yml
     parameters:
       environment: $(environment)
       subscription: $(subscription)
       runMode: ${{ parameters.runMode }}
-`, envName, envName, sub, stackName)
+`
 
 	// Write the pipeline file
 	pipelinePath := filepath.Join(".azure-pipelines", fmt.Sprintf("%s-pipeline.yml", envName))
@@ -632,4 +691,38 @@ stages:
 	}
 
 	return nil
+}
+
+// Helper function to format apps list for YAML
+func formatAppsList(apps []string) string {
+	if len(apps) == 0 {
+		return "[]"
+	}
+	var result strings.Builder
+	result.WriteString("[")
+	for i, app := range apps {
+		if i > 0 {
+			result.WriteString(", ")
+		}
+		result.WriteString(fmt.Sprintf("'%s'", app))
+	}
+	result.WriteString("]")
+	return result.String()
+}
+
+// Helper function to format dependencies for YAML
+func formatDependencies(deps []string) string {
+	if len(deps) == 0 {
+		return "[]"
+	}
+	var result strings.Builder
+	result.WriteString("[")
+	for i, dep := range deps {
+		if i > 0 {
+			result.WriteString(", ")
+		}
+		result.WriteString(dep)
+	}
+	result.WriteString("]")
+	return result.String()
 }
