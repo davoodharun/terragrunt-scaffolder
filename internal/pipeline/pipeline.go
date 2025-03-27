@@ -311,7 +311,7 @@ parameters:
 					for _, rc := range mainConfig.Stack.Architecture.Regions[depRegion] {
 						if rc.Component == depComp && len(rc.Apps) > 0 {
 							hasApps = true
-							depApp = rc.Apps[0] // Use the first app as default
+							depApp = currentApp // Use the current app for the dependency
 							break
 						}
 					}
@@ -331,7 +331,7 @@ parameters:
 				// Add dependencies
 				var deps []string
 				for _, dep := range componentConfig.Deps {
-					if depStage := getDependencies(dep, ""); depStage != "" {
+					if depStage := getDependencies(dep, "${{ app }}"); depStage != "" {
 						deps = append(deps, depStage)
 					}
 				}
