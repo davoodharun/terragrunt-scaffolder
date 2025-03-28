@@ -632,19 +632,23 @@ func generateEnvironmentPipeline(envName string, components []Component) error {
 	// Get subscription and stack from first component (they should all be the same)
 	sub := components[0].Sub
 
-	// Read TGS config to get stack name
+	// Read TGS config to get stack name and variable group
 	tgsConfig, err := config.ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}
 
-	// Find stack name for this environment
+	// Find stack name and variable group for this environment
 	stackName := "main"
-	for _, subscription := range tgsConfig.Subscriptions {
+	varGroup := "terraform-variables" // Default value
+	for subName, subscription := range tgsConfig.Subscriptions {
 		for _, env := range subscription.Environments {
-			if env.Name == envName {
+			if env.Name == envName && subName == sub {
 				if env.Stack != "" {
 					stackName = env.Stack
+				}
+				if subscription.CIVariableGroup != "" {
+					varGroup = subscription.CIVariableGroup
 				}
 				break
 			}
@@ -652,7 +656,7 @@ func generateEnvironmentPipeline(envName string, components []Component) error {
 	}
 
 	// Create pipeline content
-	pipeline := `# Pipeline for ` + envName + ` environment
+	pipeline := fmt.Sprintf(`# Pipeline for %s environment
 trigger: none
 pr: none
 
@@ -667,22 +671,22 @@ parameters:
 
 variables:
   - name: environment
-    value: '` + envName + `'
+    value: '%s'
   - name: subscription
-    value: '` + sub + `'
-  - group: terraform-variables
+    value: '%s'
+  - group: %s
   - name: terraform_version
     value: '1.11.2'
   - name: terragrunt_version
     value: 'v0.69.10'
 
 stages:
-  - template: templates/stack-` + stackName + `.yml
+  - template: templates/stack-%s.yml
     parameters:
       environment: $(environment)
       subscription: $(subscription)
       runMode: ${{ parameters.runMode }}
-`
+`, envName, envName, sub, varGroup, stackName)
 
 	// Write the pipeline file
 	pipelinePath := filepath.Join(".azure-pipelines", fmt.Sprintf("%s-pipeline.yml", envName))

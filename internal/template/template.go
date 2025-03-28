@@ -22,7 +22,7 @@ naming:
   # ${env} - Environment prefix
   # ${type} - Resource type prefix
   # ${app} - Application name (if applicable)
-  format: "${project}-${region}${env}-${type}"
+  format: "{project}-{region}{env}-{type}"
   separator: "-"  # Default separator between name parts
   
   # Resource type prefixes
@@ -41,9 +41,9 @@ naming:
   # Optional: Custom formats for specific components
   component_formats:
     keyvault:
-      format: "${project}-${type}-${env}"  # Custom format for Key Vault
+      format: "{project}-{type}-{env}"  # Custom format for Key Vault
     storage:
-      format: "${project}${type}${env}"    # Custom format for Storage Account
+      format: "{project}{type}{env}"    # Custom format for Storage Account
       separator: ""                        # No separator for Storage Account names
 
 subscriptions:

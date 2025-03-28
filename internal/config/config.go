@@ -31,8 +31,10 @@ type ComponentFormat struct {
 
 // Subscription represents an Azure subscription configuration
 type Subscription struct {
-	RemoteState  RemoteState   `yaml:"remotestate"`
-	Environments []Environment `yaml:"environments"`
+	Name            string        `yaml:"name"`
+	RemoteState     RemoteState   `yaml:"remotestate"`
+	Environments    []Environment `yaml:"environments"`
+	CIVariableGroup string        `yaml:"ci_variable_group"`
 }
 
 // RemoteState represents the remote state configuration
