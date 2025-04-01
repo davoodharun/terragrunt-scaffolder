@@ -488,21 +488,32 @@ else
   cd .infrastructure/architecture/$2/$3/$4/$5
 fi
 
+# Function to convert JSON to terragrunt var arguments
+convert_json_to_vars() {
+  if [ -n "$INLINE_VARS" ]; then
+    # Use jq to parse the JSON and convert it to var arguments
+    echo "$INLINE_VARS" | jq -r 'to_entries | .[] | "-var=\"\(.key)=\(.value)\""' | tr '\n' ' '
+  fi
+}
+
+# Get the var arguments
+VAR_ARGS=$(convert_json_to_vars)
+
 # Always run init
 terragrunt init
 
 # Run the appropriate command based on runMode
 case "$6" in
   "plan")
-    terragrunt plan
+    terragrunt plan $VAR_ARGS
     ;;
   "apply")
-    terragrunt plan
-    terragrunt apply --auto-approve
-	terragrunt output
+    terragrunt plan $VAR_ARGS
+    terragrunt apply --auto-approve $VAR_ARGS
+    terragrunt output
     ;;
   "destroy")
-    terragrunt destroy --auto-approve
+    terragrunt destroy --auto-approve $VAR_ARGS
     ;;
   *)
     echo "Invalid runMode: $6"
