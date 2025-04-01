@@ -490,7 +490,7 @@ fi
 
 # Function to convert JSON to terragrunt var arguments
 convert_json_to_vars() {
-  if [ -n "$INLINE_VARS" ]; then
+  if [ -n "$INLINE_VARS" ] && [ "$INLINE_VARS" != '""' ]; then
     # Use jq to parse the JSON and convert it to var arguments
     echo "$INLINE_VARS" | jq -r 'to_entries | .[] | "-var=\"\(.key)=\(.value)\""' | tr '\n' ' '
   fi
