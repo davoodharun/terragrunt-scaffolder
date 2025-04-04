@@ -90,97 +90,31 @@ func getInfrastructurePath() string {
 	return infraPath
 }
 
+// Generate scaffolds the infrastructure based on the TGS configuration
 func Generate() error {
-	// Get the infrastructure path
-	infraPath := getInfrastructurePath()
-
-	// Read TGS config
+	// Read TGS configuration
 	tgsConfig, err := config.ReadTGSConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read TGS config: %w", err)
 	}
 
-	// Validate TGS config
+	// Validate TGS configuration
 	if errors := validate.ValidateTGSConfig(tgsConfig); len(errors) > 0 {
-		return fmt.Errorf("TGS config validation failed: %v", errors[0])
+		return fmt.Errorf("invalid TGS configuration: %v", errors[0])
 	}
-	logger.Success("TGS configuration validation passed")
 
-	// Track processed stacks to avoid duplicate validation
-	processedStacks := make(map[string]bool)
-
-	// Validate all stacks referenced in environments
-	for _, sub := range tgsConfig.Subscriptions {
-		for _, env := range sub.Environments {
-			stackName := "main"
-			if env.Stack != "" {
-				stackName = env.Stack
-			}
-
-			// Skip if we've already validated this stack
-			if processedStacks[stackName] {
-				continue
-			}
-			processedStacks[stackName] = true
-
-			// Read and validate the stack
-			mainConfig, err := ReadMainConfig(stackName)
-			if err != nil {
-				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
-			}
-
-			if errors := validate.ValidateStack(mainConfig); len(errors) > 0 {
-				return fmt.Errorf("stack '%s' validation failed: %v", stackName, errors[0])
-			}
-			logger.Success("Stack '%s' validation passed", stackName)
-		}
-	}
+	logger.Info("Creating infrastructure directory structure")
 
 	// Create infrastructure directory if it doesn't exist
+	infraPath := ".infrastructure"
 	if err := os.MkdirAll(infraPath, 0755); err != nil {
 		return fmt.Errorf("failed to create infrastructure directory: %w", err)
 	}
-	logger.Success("Infrastructure folder created")
 
-	// Generate root.hcl
-	if err := generateRootHCL(tgsConfig, infraPath); err != nil {
-		return fmt.Errorf("failed to generate root.hcl: %w", err)
-	}
-	logger.Success("Generated root.hcl")
-
-	// Generate environment config files
-	if err := generateEnvironmentConfigs(tgsConfig, infraPath); err != nil {
-		return fmt.Errorf("failed to generate environment config files: %w", err)
-	}
-
-	// First pass: collect all unique components and their configurations by stack
-	stackComponents := make(map[string]map[string]config.Component)
-	stackArchitectures := make(map[string]config.ArchitectureConfig)
-	for _, sub := range tgsConfig.Subscriptions {
-		for _, env := range sub.Environments {
-			stackName := "main"
-			if env.Stack != "" {
-				stackName = env.Stack
-			}
-
-			mainConfig, err := ReadMainConfig(stackName)
-			if err != nil {
-				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
-			}
-
-			// Initialize map for this stack if it doesn't exist
-			if _, exists := stackComponents[stackName]; !exists {
-				stackComponents[stackName] = make(map[string]config.Component)
-			}
-
-			// Add components from this stack
-			for compName, comp := range mainConfig.Stack.Components {
-				stackComponents[stackName][compName] = comp
-			}
-
-			// Store the architecture configuration
-			stackArchitectures[stackName] = mainConfig.Stack.Architecture
-		}
+	// Create config directory
+	configDir := filepath.Join(infraPath, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	// Create components directory
@@ -189,49 +123,88 @@ func Generate() error {
 		return fmt.Errorf("failed to create components directory: %w", err)
 	}
 
-	// Generate components for each stack
-	for stackName, components := range stackComponents {
-		// Start progress bar for component generation
-		logger.StartProgress("Generating components for stack "+stackName, len(components))
-
-		mainConfig := &config.MainConfig{
-			Stack: config.StackConfig{
-				Name:         stackName,
-				Components:   components,
-				Architecture: stackArchitectures[stackName],
-			},
-		}
-
-		// Generate components with all necessary files and validation
-		if err := generateComponents(mainConfig, infraPath); err != nil {
-			return fmt.Errorf("failed to generate components for stack %s: %w", stackName, err)
-		}
+	// Create architecture directory
+	architectureDir := filepath.Join(infraPath, "architecture")
+	if err := os.MkdirAll(architectureDir, 0755); err != nil {
+		return fmt.Errorf("failed to create architecture directory: %w", err)
 	}
 
-	// Process each subscription for environment structure
-	for subName, sub := range tgsConfig.Subscriptions {
-		// Process each environment with its specified stack
+	logger.Success("Infrastructure directory structure created")
+
+	// Calculate total steps for progress bar
+	totalSteps := 0
+	// Count components
+	for _, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
 			stackName := "main"
 			if env.Stack != "" {
 				stackName = env.Stack
 			}
+			mainConfig, err := config.ReadMainConfig(stackName)
+			if err != nil {
+				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+			}
+			totalSteps += len(mainConfig.Stack.Components)
+		}
+	}
+	// Add steps for root.hcl, environment configs, and architecture
+	totalSteps += 1 + len(tgsConfig.Subscriptions) + len(tgsConfig.Subscriptions)
 
-			// Read the stack-specific config
-			mainConfig, err := ReadMainConfig(stackName)
+	// Initialize progress bar
+	logger.StartProgress("Generating infrastructure", totalSteps)
+
+	// Generate root.hcl file
+	logger.Info("Generating root.hcl configuration")
+	if err := generateRootHCL(tgsConfig, infraPath); err != nil {
+		return fmt.Errorf("failed to generate root.hcl: %w", err)
+	}
+	logger.Success("Root.hcl configuration generated")
+	logger.UpdateProgress()
+
+	// Generate environment configurations
+	logger.Info("Generating environment configurations")
+	if err := generateEnvironmentConfigs(tgsConfig, infraPath); err != nil {
+		return fmt.Errorf("failed to generate environment configs: %w", err)
+	}
+	logger.Success("Environment configurations generated")
+	logger.UpdateProgress()
+
+	// Generate architecture and components for each subscription and environment
+	for subName, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			stackName := "main"
+			if env.Stack != "" {
+				stackName = env.Stack
+			}
+			mainConfig, err := config.ReadMainConfig(stackName)
 			if err != nil {
 				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 			}
 
-			// Generate environment structure without re-validating components
+			// Process each region in the stack configuration
 			for region, components := range mainConfig.Stack.Architecture.Regions {
+				logger.Info("Generating architecture for %s/%s/%s", subName, env.Name, region)
+				// Generate architecture
 				if err := generateEnvironment(subName, region, env.Name, components, infraPath); err != nil {
-					return fmt.Errorf("failed to generate environment structure: %w", err)
+					return fmt.Errorf("failed to generate environment for %s/%s: %w", subName, env.Name, err)
 				}
+				logger.Success("Architecture generated for %s/%s/%s", subName, env.Name, region)
+				logger.UpdateProgress()
+
+				logger.Info("Generating components for %s/%s/%s", subName, env.Name, region)
+				// Generate components
+				if err := generateComponents(mainConfig, infraPath); err != nil {
+					return fmt.Errorf("failed to generate components: %w", err)
+				}
+				logger.Success("Components generated for %s/%s/%s", subName, env.Name, region)
+				logger.UpdateProgress()
 			}
 		}
 	}
-	logger.Success("Generated architecture scaffolding")
+
+	// Finish progress bar
+	logger.FinishProgress()
+	logger.Success("Infrastructure generation completed successfully")
 
 	return nil
 }

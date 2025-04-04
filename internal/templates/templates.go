@@ -18,3 +18,26 @@ type EnvironmentConfigData struct {
 	EnvironmentPrefix string
 	StackName         string
 }
+
+// EnvironmentData represents the data needed for environment configuration templates
+type EnvironmentData struct {
+	SubscriptionName  string
+	EnvironmentName   string
+	EnvironmentPrefix string
+	RemoteStateName   string
+	ResourceGroup     string
+}
+
+// RemoteStateData represents the data needed for remote state configuration
+type RemoteStateData struct {
+	Name           string
+	ResourceGroup  string
+	StorageAccount string
+	ContainerName  string
+}
+
+// RootData represents the data needed for root configuration templates
+type RootData struct {
+	ProjectName string
+	RemoteState RemoteStateData
+}

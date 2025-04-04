@@ -151,190 +151,46 @@ func generateEnvironment(subscription, region string, envName string, components
 	return nil
 }
 
+// generateEnvironmentConfigs generates environment configuration files
 func generateEnvironmentConfigs(tgsConfig *config.TGSConfig, infraPath string) error {
-	// Create config directory
+	// Initialize template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to initialize template renderer: %w", err)
+	}
+
+	// Get the config directory
 	configDir := filepath.Join(infraPath, "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
 
-	// Build the data structure for global.hcl template
-	globalData := templates.GlobalConfigData{
-		ProjectName: tgsConfig.Name,
-		Stacks:      make(map[string]templates.StackConfig),
-	}
-
-	// Track unique stacks and their environments
-	uniqueStacks := make(map[string]bool)
-	stackEnvironments := make(map[string]map[string]bool)
-
-	// First pass: collect all unique stacks and their environments
-	for _, sub := range tgsConfig.Subscriptions {
-		for _, env := range sub.Environments {
-			stackName := "main"
-			if env.Stack != "" {
-				stackName = env.Stack
-			}
-			uniqueStacks[stackName] = true
-
-			if _, ok := stackEnvironments[stackName]; !ok {
-				stackEnvironments[stackName] = make(map[string]bool)
-			}
-			stackEnvironments[stackName][env.Name] = true
-		}
-	}
-
-	// Second pass: build the complete data structure
-	for stackName := range uniqueStacks {
-		stackConfig := templates.StackConfig{
-			Environments: make(map[string]templates.EnvironmentConfig),
-		}
-
-		// Add environments for this stack
-		for envName := range stackEnvironments[stackName] {
-			envConfig := templates.EnvironmentConfig{
-				Prefix:  getEnvironmentPrefix(envName),
-				Regions: make(map[string]templates.RegionConfig),
-			}
-
-			// Add regions for this environment
-			// We'll use the regions from the stack configuration
-			mainConfig, err := ReadMainConfig(stackName)
-			if err != nil {
-				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
-			}
-
-			for region := range mainConfig.Stack.Architecture.Regions {
-				envConfig.Regions[region] = templates.RegionConfig{
-					Prefix: GetRegionPrefix(region),
-				}
-			}
-
-			stackConfig.Environments[envName] = envConfig
-		}
-
-		globalData.Stacks[stackName] = stackConfig
-	}
-
-	// Generate global.hcl using the template
-	globalPath := filepath.Join(configDir, "global.hcl")
-	if err := templates.Render("environment/global.hcl.tmpl", globalPath, globalData); err != nil {
-		return fmt.Errorf("failed to create global config file: %w", err)
-	}
-
-	logger.Success("Generated environment configuration files")
-
-	// Generate a config file for each environment in each subscription
+	// Process each subscription
 	for subName, sub := range tgsConfig.Subscriptions {
+		// Process each environment
 		for _, env := range sub.Environments {
-			envName := env.Name
-
-			// Use the stack specified in the environment config, default to "main" if not specified
-			stackName := "main"
-			if env.Stack != "" {
-				stackName = env.Stack
+			// Create environment directory
+			envDir := filepath.Join(configDir, subName, env.Name)
+			if err := os.MkdirAll(envDir, 0755); err != nil {
+				return fmt.Errorf("failed to create environment directory for %s/%s: %w", subName, env.Name, err)
 			}
 
-			// Create environments directory under the stack's config folder
-			environmentsDir := filepath.Join(configDir, stackName, "environments", subName)
-			if err := os.MkdirAll(environmentsDir, 0755); err != nil {
-				return fmt.Errorf("failed to create environments directory: %w", err)
+			// Prepare environment data
+			envData := &templates.EnvironmentTemplateData{
+				EnvironmentName:           env.Name,
+				EnvironmentPrefix:         getEnvironmentPrefix(env.Name),
+				Subscription:              subName,
+				RemoteStateResourceGroup:  sub.RemoteState.ResourceGroup,
+				RemoteStateStorageAccount: sub.RemoteState.Name,
 			}
 
-			// Read the stack configuration to get actual components
-			mainConfig, err := ReadMainConfig(stackName)
+			// Render environment.hcl template
+			envHcl, err := renderer.RenderTemplate("environment/environment.hcl.tmpl", envData)
 			if err != nil {
-				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
+				return fmt.Errorf("failed to render environment.hcl template: %w", err)
 			}
 
-			// Build environment config content with only the components that exist in the stack
-			var configContent strings.Builder
-			configContent.WriteString(fmt.Sprintf("# Configuration for %s environment in stack %s\n", envName, stackName))
-			configContent.WriteString("# Override these values as needed for your environment\n\n")
-			configContent.WriteString("locals {\n")
-
-			// Add configurations only for components that exist in the stack
-			for compName, comp := range mainConfig.Stack.Components {
-				if comp.Provider == "" {
-					continue
-				}
-
-				// Fetch provider schema for this component
-				schema, err := fetchProviderSchema(comp.Provider, comp.Version, comp.Source)
-				if err != nil || schema == nil {
-					logger.Warning("Failed to fetch provider schema for %s: %v", compName, err)
-					continue
-				}
-
-				// Try different provider keys
-				providerKeys := []string{
-					"registry.terraform.io/hashicorp/azurerm",
-					"hashicorp/azurerm",
-				}
-
-				var resourceSchema struct {
-					Block struct {
-						Attributes map[string]SchemaAttribute `json:"attributes"`
-						BlockTypes map[string]struct {
-							Block struct {
-								Attributes map[string]SchemaAttribute `json:"attributes"`
-							} `json:"block"`
-							NestingMode string `json:"nesting_mode"`
-						} `json:"block_types"`
-					} `json:"block"`
-				}
-
-				found := false
-				for _, key := range providerKeys {
-					if provider, ok := schema.ProviderSchema[key]; ok {
-						if rs, ok := provider.ResourceSchemas[comp.Source]; ok {
-							resourceSchema = rs
-							found = true
-							break
-						}
-					}
-				}
-
-				if !found {
-					continue
-				}
-
-				// Start component configuration block
-				configContent.WriteString(fmt.Sprintf("  # %s Configuration\n", compName))
-				configContent.WriteString(fmt.Sprintf("  %s = {\n", compName))
-
-				// Add required attributes with default values
-				for name, attr := range resourceSchema.Block.Attributes {
-					if attr.Required && !shouldSkipVariable(name, comp.Source) {
-						defaultValue := getDefaultValueForType(attr.Type, name, envName)
-						configContent.WriteString(fmt.Sprintf("    %s = %s\n", name, defaultValue))
-					}
-				}
-
-				// Add block types (nested configurations)
-				for blockName, blockType := range resourceSchema.Block.BlockTypes {
-					configContent.WriteString(fmt.Sprintf("    %s = {\n", blockName))
-					for attrName, attr := range blockType.Block.Attributes {
-						if attr.Required {
-							defaultValue := getDefaultValueForType(attr.Type, attrName, envName)
-							configContent.WriteString(fmt.Sprintf("      %s = %s\n", attrName, defaultValue))
-						}
-					}
-					configContent.WriteString("    }\n")
-				}
-
-				configContent.WriteString("  }\n\n")
+			// Write environment.hcl file
+			if err := createFile(filepath.Join(envDir, "environment.hcl"), envHcl); err != nil {
+				return fmt.Errorf("failed to create environment.hcl: %w", err)
 			}
-
-			configContent.WriteString("}")
-
-			// Create environment config file in the environments directory
-			configPath := filepath.Join(environmentsDir, fmt.Sprintf("%s.env.hcl", envName))
-			if err := createFile(configPath, configContent.String()); err != nil {
-				return fmt.Errorf("failed to create environment config file: %w", err)
-			}
-
-			logger.Info("Generated environment config file: %s", configPath)
 		}
 	}
 
@@ -421,10 +277,10 @@ func getDefaultRedisSkuForEnvironment(env string) string {
 func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
 	logger.Info("Generating root.hcl configuration")
 
-	// Ensure the .infrastructure directory exists
-	baseDir := filepath.Base(infraPath)
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return fmt.Errorf("failed to create infrastructure directory: %w", err)
+	// Create root directory
+	rootDir := filepath.Join(infraPath, "root")
+	if err := os.MkdirAll(rootDir, 0755); err != nil {
+		return fmt.Errorf("failed to create root directory: %w", err)
 	}
 
 	// Create a new template renderer
@@ -439,7 +295,7 @@ func generateRootHCL(tgsConfig *config.TGSConfig, infraPath string) error {
 		return fmt.Errorf("failed to render root.hcl template: %w", err)
 	}
 
-	return createFile(filepath.Join(baseDir, "root.hcl"), rootHCL)
+	return createFile(filepath.Join(rootDir, "root.hcl"), rootHCL)
 }
 
 // generateEnvironmentConfig creates environment-specific configuration files

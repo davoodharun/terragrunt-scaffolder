@@ -117,6 +117,9 @@ var detailsCmd = &cobra.Command{
 }
 
 func main() {
+	// Reset logger to ensure logging is enabled
+	logger.Reset()
+
 	if err := rootCmd.Execute(); err != nil {
 		logger.Error("Error: %v", err)
 		os.Exit(1)
