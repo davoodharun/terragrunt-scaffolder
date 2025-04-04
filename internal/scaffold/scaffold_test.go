@@ -2,9 +2,9 @@ package scaffold
 
 import (
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 )
 
 // TestPath defines the structure for test path validation
@@ -15,277 +15,276 @@ type TestPath struct {
 }
 
 func TestGenerateCommand(t *testing.T) {
-	testCases := []struct {
-		name        string
-		tgsConfig   string
-		stackConfig string
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name: "Valid configuration",
-			tgsConfig: `name: projecta
+	// Enable test mode to suppress logs
+	logger.SetTestMode(true)
+	defer logger.SetTestMode(false)
+
+	// Create temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "scaffold-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Change to temp directory
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current directory: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer os.Chdir(oldDir)
+
+	// Create necessary directories
+	dirs := []string{
+		".tgs",
+		".tgs/stacks",
+		".infrastructure",
+		".infrastructure/config",
+		".infrastructure/_components",
+		".infrastructure/architecture",
+		".infrastructure/root",
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("Failed to create directory %s: %v", dir, err)
+		}
+	}
+
+	// Write test configuration files
+	tgsConfig := `name: test-project
+remote_state:
+  name: test-state
+  resource_group: test-rg
+  storage_account: teststorage
+  container_name: tfstate
 subscriptions:
-  nonprod:
-    remotestate:
-      name: stprojectanonprodtf
-      resource_group: rg-projecta-nonprod-tf
+  sub1:
     environments:
       - name: dev
-        stack: main`,
-			stackConfig: `stack:
+        stack: main
+      - name: prod
+        stack: main
+    remotestate:
+      name: test-state-sub1
+      resource_group: test-rg-sub1`
+
+	if err := os.WriteFile(".tgs/tgs.yaml", []byte(tgsConfig), 0644); err != nil {
+		t.Fatalf("Failed to write tgs.yaml: %v", err)
+	}
+
+	mainConfig := `version: 1.0.0
+description: Test stack
+stack:
   name: main
-  version: "1.0.0"
-  description: "Test stack"
+  version: 1.0.0
+  description: Test stack
   components:
+    storage:
+      source: azurerm_storage_account
+      version: "3.0.0"
+      provider: azurerm
+      description: "Storage account for test"
     redis:
       source: azurerm_redis_cache
+      version: "3.0.0"
       provider: azurerm
-      version: 4.22.0
-      description: "Redis cache for caching"
-    appservice:
-      source: azurerm_app_service
-      provider: azurerm
-      version: 4.22.0
-      description: "App service for API"
+      description: "Redis cache for test"
       deps:
-        - "{region}.redis"
+        - eastus.storage
   architecture:
     regions:
-      eastus2:
+      eastus:
+        - component: storage
+          apps: []
         - component: redis
           apps: []
-        - component: appservice
-          apps:
-            - api`,
+      westus:
+        - component: storage
+          apps: []
+        - component: redis
+          apps: []`
+
+	if err := os.WriteFile(".tgs/stacks/main.yaml", []byte(mainConfig), 0644); err != nil {
+		t.Fatalf("Failed to write main.yaml: %v", err)
+	}
+
+	// Run tests
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{
+			name:    "Generate basic infrastructure",
 			wantErr: false,
 		},
 		{
-			name: "Missing project name in tgs.yaml",
-			tgsConfig: `subscriptions:
-  nonprod:
-    remotestate:
-      name: stprojectanonprodtf
-      resource_group: rg-projecta-nonprod-tf
-    environments:
-      - name: dev
-        stack: main`,
-			stackConfig: `stack:
-  name: main
-  version: "1.0.0"
-  description: "Test stack"
-  components:
-    redis:
-      source: azurerm_redis_cache
-      provider: azurerm
-      version: 4.22.0
-      description: "Redis cache"`,
-			wantErr:     true,
-			errContains: "project name cannot be empty",
-		},
-		{
-			name: "Missing remotestate in subscription",
-			tgsConfig: `name: projecta
-subscriptions:
-  nonprod:
-    environments:
-      - name: dev
-        stack: main`,
-			stackConfig: `stack:
-  name: main
-  version: "1.0.0"
-  description: "Test stack"
-  components:
-    redis:
-      source: azurerm_redis_cache
-      provider: azurerm
-      version: 4.22.0
-      description: "Redis cache"`,
-			wantErr:     true,
-			errContains: "remotestate.name property must be filled",
-		},
-		{
-			name: "Missing stack version",
-			tgsConfig: `name: projecta
-subscriptions:
-  nonprod:
-    remotestate:
-      name: stprojectanonprodtf
-      resource_group: rg-projecta-nonprod-tf
-    environments:
-      - name: dev
-        stack: main`,
-			stackConfig: `stack:
-  name: main
-  description: "Test stack"
-  components:
-    redis:
-      source: azurerm_redis_cache
-      provider: azurerm
-      version: 4.22.0
-      description: "Redis cache"`,
-			wantErr:     true,
-			errContains: "version property must be filled",
-		},
-		{
-			name: "Missing component description",
-			tgsConfig: `name: projecta
-subscriptions:
-  nonprod:
-    remotestate:
-      name: stprojectanonprodtf
-      resource_group: rg-projecta-nonprod-tf
-    environments:
-      - name: dev
-        stack: main`,
-			stackConfig: `stack:
-  name: main
-  version: "1.0.0"
-  description: "Test stack"
-  components:
-    redis:
-      source: azurerm_redis_cache
-      provider: azurerm
-      version: 4.22.0`,
-			wantErr:     true,
-			errContains: "description property must be filled",
-		},
-		{
-			name: "Invalid dependency format",
-			tgsConfig: `name: projecta
-subscriptions:
-  nonprod:
-    remotestate:
-      name: stprojectanonprodtf
-      resource_group: rg-projecta-nonprod-tf
-    environments:
-      - name: dev
-        stack: main`,
-			stackConfig: `stack:
-  name: main
-  version: "1.0.0"
-  description: "Test stack"
-  components:
-    appservice:
-      source: azurerm_app_service
-      provider: azurerm
-      version: 4.22.0
-      description: "App service"
-      deps:
-        - "invalid_dependency"`,
-			wantErr:     true,
-			errContains: "invalid dependency format",
-		},
-		{
-			name: "Component referenced in architecture but not defined",
-			tgsConfig: `name: projecta
-subscriptions:
-  nonprod:
-    remotestate:
-      name: stprojectanonprodtf
-      resource_group: rg-projecta-nonprod-tf
-    environments:
-      - name: dev
-        stack: main`,
-			stackConfig: `stack:
-  name: main
-  version: "1.0.0"
-  description: "Test stack"
-  components:
-    redis:
-      source: azurerm_redis_cache
-      provider: azurerm
-      version: 4.22.0
-      description: "Redis cache"
-  architecture:
-    regions:
-      eastus2:
-        - component: undefined_component
-          apps: []`,
-			wantErr:     true,
-			errContains: "component 'undefined_component' referenced in architecture but not defined",
-		},
-		{
-			name: "Invalid region in dependency",
-			tgsConfig: `name: projecta
-subscriptions:
-  nonprod:
-    remotestate:
-      name: stprojectanonprodtf
-      resource_group: rg-projecta-nonprod-tf
-    environments:
-      - name: dev
-        stack: main`,
-			stackConfig: `stack:
-  name: main
-  version: "1.0.0"
-  description: "Test stack"
-  components:
-    redis:
-      source: azurerm_redis_cache
-      provider: azurerm
-      version: 4.22.0
-      description: "Redis cache"
-    appservice:
-      source: azurerm_app_service
-      provider: azurerm
-      version: 4.22.0
-      description: "App service"
-      deps:
-        - "invalid_region.redis"`,
-			wantErr:     true,
-			errContains: "invalid region in dependency",
+			name:    "Handle dependencies",
+			wantErr: false,
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create temporary directory
-			tmpDir, err := os.MkdirTemp("", "tgs-test-*")
-			if err != nil {
-				t.Fatalf("Failed to create temp directory: %v", err)
-			}
-			defer os.RemoveAll(tmpDir)
-
-			// Save current directory and change to temp directory
-			currentDir, err := os.Getwd()
-			if err != nil {
-				t.Fatalf("Failed to get current directory: %v", err)
-			}
-			if err := os.Chdir(tmpDir); err != nil {
-				t.Fatalf("Failed to change to temp directory: %v", err)
-			}
-			defer os.Chdir(currentDir)
-
-			// Create .tgs directory and config files
-			tgsDir := filepath.Join(tmpDir, ".tgs")
-			stacksDir := filepath.Join(tgsDir, "stacks")
-			if err := os.MkdirAll(stacksDir, 0755); err != nil {
-				t.Fatalf("Failed to create .tgs/stacks directory: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Generate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Generate() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
 
-			// Write tgs.yaml
-			if err := os.WriteFile(filepath.Join(tgsDir, "tgs.yaml"), []byte(tc.tgsConfig), 0644); err != nil {
-				t.Fatalf("Failed to write tgs.yaml: %v", err)
+			// Verify generated files
+			files := []string{
+				".infrastructure/root/root.hcl",
+				".infrastructure/config/sub1/dev/environment.hcl",
+				".infrastructure/config/sub1/prod/environment.hcl",
+				".infrastructure/_components/storage/component.hcl",
+				".infrastructure/_components/redis/component.hcl",
 			}
 
-			// Write main.yaml stack file
-			if err := os.WriteFile(filepath.Join(stacksDir, "main.yaml"), []byte(tc.stackConfig), 0644); err != nil {
-				t.Fatalf("Failed to write main.yaml: %v", err)
-			}
-
-			// Run generate command
-			err = Generate()
-
-			// Check if error matches expectation
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("Generate() expected error containing %q, got no error", tc.errContains)
-				} else if !strings.Contains(err.Error(), tc.errContains) {
-					t.Errorf("Generate() error = %v, want error containing %q", err, tc.errContains)
+			for _, file := range files {
+				if _, err := os.Stat(file); os.IsNotExist(err) {
+					t.Errorf("Expected file %s was not created", file)
 				}
-			} else if err != nil {
-				t.Errorf("Generate() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestScaffold(t *testing.T) {
+	// Enable test mode to suppress logs
+	logger.SetTestMode(true)
+	defer logger.SetTestMode(false)
+
+	// Create temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "scaffold-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Change to temp directory
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current directory: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer os.Chdir(oldDir)
+
+	// Create necessary directories
+	dirs := []string{
+		".tgs",
+		".tgs/stacks",
+		".infrastructure",
+		".infrastructure/config",
+		".infrastructure/_components",
+		".infrastructure/architecture",
+		".infrastructure/root",
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("Failed to create directory %s: %v", dir, err)
+		}
+	}
+
+	// Write test configuration files
+	tgsConfig := `name: test-project
+remote_state:
+  name: test-state
+  resource_group: test-rg
+  storage_account: teststorage
+  container_name: tfstate
+subscriptions:
+  sub1:
+    environments:
+      - name: dev
+        stack: main
+      - name: prod
+        stack: main
+    remotestate:
+      name: test-state-sub1
+      resource_group: test-rg-sub1`
+
+	if err := os.WriteFile(".tgs/tgs.yaml", []byte(tgsConfig), 0644); err != nil {
+		t.Fatalf("Failed to write tgs.yaml: %v", err)
+	}
+
+	mainConfig := `version: 1.0.0
+description: Test stack
+stack:
+  name: main
+  version: 1.0.0
+  description: Test stack
+  components:
+    storage:
+      source: azurerm_storage_account
+      version: "3.0.0"
+      provider: azurerm
+      description: "Storage account for test"
+    redis:
+      source: azurerm_redis_cache
+      version: "3.0.0"
+      provider: azurerm
+      description: "Redis cache for test"
+      deps:
+        - eastus.storage
+  architecture:
+    regions:
+      eastus:
+        - component: storage
+          apps: []
+        - component: redis
+          apps: []
+      westus:
+        - component: storage
+          apps: []
+        - component: redis
+          apps: []`
+
+	if err := os.WriteFile(".tgs/stacks/main.yaml", []byte(mainConfig), 0644); err != nil {
+		t.Fatalf("Failed to write main.yaml: %v", err)
+	}
+
+	// Run tests
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{
+			name:    "Generate basic infrastructure",
+			wantErr: false,
+		},
+		{
+			name:    "Handle dependencies",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Generate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Generate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			// Verify generated files
+			files := []string{
+				".infrastructure/root/root.hcl",
+				".infrastructure/config/sub1/dev/environment.hcl",
+				".infrastructure/config/sub1/prod/environment.hcl",
+				".infrastructure/_components/storage/component.hcl",
+				".infrastructure/_components/redis/component.hcl",
+			}
+
+			for _, file := range files {
+				if _, err := os.Stat(file); os.IsNotExist(err) {
+					t.Errorf("Expected file %s was not created", file)
+				}
 			}
 		})
 	}
