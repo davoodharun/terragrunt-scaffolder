@@ -64,7 +64,7 @@ func generateTerraformFiles(compPath string, comp config.Component) error {
 		}
 
 		if !found {
-			logger.Warning("Schema not found for resource %s, generating basic resource", resourceType)
+			logger.Warning("Schema not found for resource %s", comp.Source)
 			resourceContents = append(resourceContents, fmt.Sprintf(`
 resource "%s" "this" {
   name                = var.name
@@ -227,57 +227,6 @@ variable "tags" {
 	return nil
 }
 
-func generateBasicTerraformFiles(compPath string, comp config.Component) error {
-	// Generate basic main.tf
-	mainContent := fmt.Sprintf(`
-resource "%s" "this" {
-  name                = var.name
-  resource_group_name = var.resource_group_name
-  location            = var.location
-
-  tags = var.tags
-}`, comp.Source)
-
-	if err := createFile(filepath.Join(compPath, "main.tf"), mainContent); err != nil {
-		return err
-	}
-
-	// Generate basic variables.tf
-	varsContent := `
-variable "name" {
-  type        = string
-  description = "The name of the resource"
-}
-
-variable "resource_group_name" {
-  type        = string
-  description = "The name of the resource group"
-}
-
-variable "location" {
-  type        = string
-  description = "The location/region of the resource"
-}
-
-variable "tags" {
-  type        = map(string)
-  description = "Tags to apply to the resource"
-  default     = {}
-}`
-
-	if err := createFile(filepath.Join(compPath, "variables.tf"), varsContent); err != nil {
-		return err
-	}
-
-	// Generate provider.tf
-	providerContent := generateProviderTF(comp)
-	if err := createFile(filepath.Join(compPath, "provider.tf"), providerContent); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func generateProviderTF(comp config.Component) string {
 	return fmt.Sprintf(`terraform {
   required_providers {
@@ -328,7 +277,7 @@ func generateMainTF(comp config.Component, schema *ProviderSchema) string {
 	}
 
 	if !found {
-		fmt.Printf("Warning: Schema not found for resource %s\n", comp.Source)
+		logger.Warning("Schema not found for resource %s", comp.Source)
 		return fmt.Sprintf(`
 resource "%s" "this" {
   name                = var.name

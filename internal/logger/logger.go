@@ -44,9 +44,6 @@ func StartProgress(description string, total int) {
 		bar = nil
 	}
 
-	// Print a newline to create space for the progress bar
-	fmt.Println()
-
 	// Create new progress bar with custom options
 	bar = progressbar.NewOptions(total,
 		progressbar.OptionSetDescription(description),
@@ -67,6 +64,9 @@ func StartProgress(description string, total int) {
 		progressbar.OptionShowCount(),
 		progressbar.OptionSetWriter(os.Stderr),
 	)
+
+	// Print a newline to create space for the progress bar
+	fmt.Println()
 }
 
 // UpdateProgress updates the progress bar
@@ -108,6 +108,13 @@ func shouldKeepInHistory(message string) bool {
 		"Infrastructure folder created",
 		"Components created",
 		"All components validated successfully",
+		"Generated root.hcl configuration",
+		"Generated environment configurations",
+		"Component structure validation passed",
+		"Infrastructure generation completed successfully",
+		"Created directory",
+		"Generated files for",
+		"Components generated successfully",
 	}
 
 	for _, important := range importantMessages {
@@ -140,10 +147,8 @@ func printWithHistory(message string, isSuccess bool) {
 			}
 		}
 
-		// Move up enough lines to show all history
-		for i := 0; i < len(history); i++ {
-			fmt.Print(MoveUp + ClearLine)
-		}
+		// Clear the current line
+		fmt.Print(ClearLine)
 
 		// Print all history
 		for _, msg := range history {
@@ -153,10 +158,8 @@ func printWithHistory(message string, isSuccess bool) {
 		// Print the current message
 		fmt.Println(message)
 
-		// Move back down to the progress bar
-		for i := 0; i < len(history)+1; i++ {
-			fmt.Print(MoveDown)
-		}
+		// Print the progress bar
+		bar.RenderBlank()
 	} else {
 		fmt.Println(message)
 	}

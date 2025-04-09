@@ -11,6 +11,18 @@ import (
 	"github.com/hashicorp/hcl/v2/hclparse"
 )
 
+// fileExists checks if a file exists and is not a directory
+func fileExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return !info.IsDir(), nil
+}
+
 // ValidateGeneratedConfigs checks the HCL syntax of all generated configuration files
 func ValidateGeneratedConfigs() error {
 	logger.Info("Validating generated configuration files")
@@ -208,90 +220,61 @@ func validateStackConfigs() error {
 
 // ValidateComponentStructure validates the structure and content of a component directory
 func ValidateComponentStructure(componentPath string) error {
-	// Check required files exist
+	logger.Info("Validating component structure at %s", componentPath)
 	requiredFiles := []string{
+		"component.hcl",
 		"main.tf",
 		"variables.tf",
 		"provider.tf",
-		"component.hcl",
 	}
 
 	for _, file := range requiredFiles {
 		filePath := filepath.Join(componentPath, file)
-		if _, err := os.Stat(filePath); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("required file %s is missing in component", file)
-			}
+		exists, err := fileExists(filePath)
+		if err != nil {
+			logger.Error("Error checking file %s: %v", file, err)
 			return fmt.Errorf("error checking file %s: %w", file, err)
+		}
+		if !exists {
+			logger.Error("Required file %s is missing in component", file)
+			return fmt.Errorf("required file %s is missing in component", file)
 		}
 	}
 
+	logger.Success("Component structure validation passed")
 	return nil
-}
-
-// getRequiredVariablesForResource returns a map of required variables for a given Azure resource type
-func getRequiredVariablesForResource(resourceType string) map[string]bool {
-	requiredVars := make(map[string]bool)
-
-	// Common required variables for all Azure resources
-	requiredVars["name"] = true
-	requiredVars["resource_group_name"] = true
-	requiredVars["location"] = true
-
-	// Resource-specific required variables
-	switch resourceType {
-	case "azurerm_service_plan":
-		requiredVars["sku_name"] = true
-		requiredVars["os_type"] = true
-	case "azurerm_app_service":
-		requiredVars["service_plan_id"] = true
-	case "azurerm_function_app":
-		requiredVars["service_plan_id"] = true
-	case "azurerm_redis_cache":
-		requiredVars["sku_name"] = true
-	case "azurerm_key_vault":
-		requiredVars["sku_name"] = true
-	case "azurerm_servicebus_namespace":
-		requiredVars["sku"] = true
-	case "azurerm_cosmosdb_account":
-		requiredVars["offer_type"] = true
-		requiredVars["consistency_level"] = true
-	case "azurerm_storage_account":
-		requiredVars["account_tier"] = true
-		requiredVars["account_replication_type"] = true
-	case "azurerm_sql_server":
-		requiredVars["version"] = true
-		requiredVars["administrator_login"] = true
-	case "azurerm_sql_database":
-		requiredVars["server_id"] = true
-		requiredVars["sku_name"] = true
-	case "azurerm_eventhub_namespace":
-		requiredVars["sku"] = true
-	case "azurerm_log_analytics_workspace":
-		requiredVars["sku"] = true
-	}
-
-	return requiredVars
 }
 
 // ValidateComponentVariables validates component variables against environment config
 func ValidateComponentVariables(componentPath string, envConfigPath string) error {
-	// Check if the environment config file exists
-	if _, err := os.Stat(envConfigPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("environment config file %s does not exist", envConfigPath)
-		}
+	logger.Info("Validating component variables against environment config")
+
+	exists, err := fileExists(envConfigPath)
+	if err != nil {
+		logger.Error("Error checking environment config file: %v", err)
 		return fmt.Errorf("error checking environment config file: %w", err)
 	}
-
-	// Check if the component.hcl file exists
-	compPath := filepath.Join(componentPath, "component.hcl")
-	if _, err := os.Stat(compPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("component.hcl file does not exist in %s", componentPath)
-		}
-		return fmt.Errorf("error checking component.hcl file: %w", err)
+	if !exists {
+		logger.Error("Environment config file %s does not exist", envConfigPath)
+		return fmt.Errorf("environment config file %s does not exist", envConfigPath)
 	}
 
+	componentHCL := filepath.Join(componentPath, "component.hcl")
+	exists, err = fileExists(componentHCL)
+	if err != nil {
+		logger.Error("Error checking component.hcl file: %v", err)
+		return fmt.Errorf("error checking component.hcl file: %w", err)
+	}
+	if !exists {
+		logger.Error("component.hcl file does not exist in %s", componentPath)
+		return fmt.Errorf("component.hcl file does not exist in %s", componentPath)
+	}
+
+	logger.Success("Component variables validation passed")
 	return nil
+}
+
+// getInfrastructurePath returns the path to the infrastructure directory
+func getInfrastructurePath() string {
+	return ".infrastructure"
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 )
 
@@ -111,6 +112,12 @@ stack:
 		t.Fatalf("Failed to write main.yaml: %v", err)
 	}
 
+	// Load TGS config
+	tgsConfigObj, err := config.ReadTGSConfig()
+	if err != nil {
+		t.Fatalf("Failed to read TGS config: %v", err)
+	}
+
 	// Run tests
 	tests := []struct {
 		name    string
@@ -128,7 +135,7 @@ stack:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Generate()
+			err := Generate(tgsConfigObj)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Generate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -249,6 +256,12 @@ stack:
 		t.Fatalf("Failed to write main.yaml: %v", err)
 	}
 
+	// Load TGS config
+	tgsConfigObj, err := config.ReadTGSConfig()
+	if err != nil {
+		t.Fatalf("Failed to read TGS config: %v", err)
+	}
+
 	// Run tests
 	tests := []struct {
 		name    string
@@ -266,7 +279,7 @@ stack:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Generate()
+			err := Generate(tgsConfigObj)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Generate() error = %v, wantErr %v", err, tt.wantErr)
 				return

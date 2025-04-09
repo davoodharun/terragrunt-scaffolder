@@ -69,9 +69,9 @@ var detailsCmd = &cobra.Command{
 		}
 
 		// Print stack details
-		fmt.Printf("\nStack: %s\n", mainConfig.Stack.Name)
-		fmt.Printf("Version: %s\n", mainConfig.Stack.Version)
-		fmt.Printf("Description: %s\n\n", mainConfig.Stack.Description)
+		logger.Info("\nStack: %s", mainConfig.Stack.Name)
+		logger.Info("Version: %s", mainConfig.Stack.Version)
+		logger.Info("Description: %s\n", mainConfig.Stack.Description)
 
 		// Group components by type
 		componentTypes := make(map[string][]string)
@@ -87,28 +87,28 @@ var detailsCmd = &cobra.Command{
 		}
 		sort.Strings(types)
 
-		fmt.Println("Resources:")
-		fmt.Println("----------")
+		logger.Info("Resources:")
+		logger.Info("----------")
 		for _, resourceType := range types {
 			components := componentTypes[resourceType]
 			sort.Strings(components)
-			fmt.Printf("\n%s:\n", strings.ReplaceAll(resourceType, "_", " "))
+			logger.Info("\n%s:", strings.ReplaceAll(resourceType, "_", " "))
 			for _, comp := range components {
-				fmt.Printf("  - %s: %s\n", comp, mainConfig.Stack.Components[comp].Description)
+				logger.Info("  - %s: %s", comp, mainConfig.Stack.Components[comp].Description)
 			}
 		}
 
-		fmt.Println("\nRegions:")
-		fmt.Println("--------")
+		logger.Info("\nRegions:")
+		logger.Info("--------")
 		for region, components := range mainConfig.Stack.Architecture.Regions {
-			fmt.Printf("\n%s:\n", region)
+			logger.Info("\n%s:", region)
 			var compNames []string
 			for _, comp := range components {
 				compNames = append(compNames, comp.Component)
 			}
 			sort.Strings(compNames)
 			for _, comp := range compNames {
-				fmt.Printf("  - %s\n", comp)
+				logger.Info("  - %s", comp)
 			}
 		}
 
@@ -177,9 +177,9 @@ var createContainerCmd = &cobra.Command{
 		})
 		i := 1
 
-		fmt.Println("\nAvailable storage accounts:")
+		logger.Info("\nAvailable storage accounts:")
 		for subName, sub := range tgsConfig.Subscriptions {
-			fmt.Printf("%d. %s (Subscription: %s)\n", i, sub.RemoteState.Name, subName)
+			logger.Info("%d. %s (Subscription: %s)", i, sub.RemoteState.Name, subName)
 			storageAccounts[i] = struct {
 				name string
 				sub  string
@@ -192,7 +192,7 @@ var createContainerCmd = &cobra.Command{
 
 		// Get user input
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("\nEnter the number of the storage account to use: ")
+		logger.Info("\nEnter the number of the storage account to use: ")
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read input: %w", err)
@@ -207,7 +207,7 @@ var createContainerCmd = &cobra.Command{
 		}
 
 		selectedAccount := storageAccounts[choice]
-		fmt.Printf("\nCreating container '%s' in storage account '%s' (Subscription: %s)...\n",
+		logger.Info("\nCreating container '%s' in storage account '%s' (Subscription: %s)...\n",
 			tgsConfig.Name, selectedAccount.name, selectedAccount.sub)
 
 		// Create the container using Azure SDK
@@ -215,7 +215,7 @@ var createContainerCmd = &cobra.Command{
 			return fmt.Errorf("failed to create container: %w", err)
 		}
 
-		fmt.Printf("\nSuccessfully created container '%s' in storage account '%s'\n",
+		logger.Success("\nSuccessfully created container '%s' in storage account '%s'\n",
 			tgsConfig.Name, selectedAccount.name)
 
 		return nil
@@ -300,13 +300,13 @@ var scaffoldCmd = &cobra.Command{
 
 		// Validate tgs.yaml first
 		if errors := validate.ValidateTGSConfig(tgsConfig); len(errors) > 0 {
-			fmt.Println("TGS configuration validation failed:")
+			logger.Error("TGS configuration validation failed:")
 			for _, err := range errors {
-				fmt.Printf("  - %v\n", err)
+				logger.Error("  - %v", err)
 			}
 			return fmt.Errorf("tgs.yaml validation failed with %d errors", len(errors))
 		}
-		fmt.Println("TGS configuration validation successful")
+		logger.Success("TGS configuration validation successful")
 
 		// Track processed stacks to avoid duplicate validation
 		processedStacks := make(map[string]bool)
@@ -325,7 +325,7 @@ var scaffoldCmd = &cobra.Command{
 				}
 				processedStacks[stackName] = true
 
-				fmt.Printf("Validating stack '%s'...\n", stackName)
+				logger.Info("Validating stack '%s'...", stackName)
 
 				// Read and validate the stack
 				mainConfig, err := scaffold.ReadMainConfig(stackName)
@@ -334,21 +334,21 @@ var scaffoldCmd = &cobra.Command{
 				}
 
 				if errors := validate.ValidateStack(mainConfig); len(errors) > 0 {
-					fmt.Printf("Stack '%s' validation failed:\n", stackName)
+					logger.Error("Stack '%s' validation failed:", stackName)
 					for _, err := range errors {
-						fmt.Printf("  - %v\n", err)
+						logger.Error("  - %v", err)
 					}
 					return fmt.Errorf("stack '%s' validation failed with %d errors", stackName, len(errors))
 				}
 
-				fmt.Printf("Stack '%s' validation successful\n", stackName)
+				logger.Success("Stack '%s' validation successful", stackName)
 			}
 		}
 
-		fmt.Println("All configurations validated successfully, proceeding with generation...")
+		logger.Success("All configurations validated successfully, proceeding with generation...")
 
 		// If all validations pass, proceed with generation
-		return scaffold.Generate()
+		return scaffold.Generate(tgsConfig)
 	},
 }
 
@@ -374,9 +374,9 @@ var planCmd = &cobra.Command{
 
 		// Validate tgs.yaml first
 		if errors := validate.ValidateTGSConfig(tgsConfig); len(errors) > 0 {
-			fmt.Println("TGS configuration validation failed:")
+			logger.Error("TGS configuration validation failed:")
 			for _, err := range errors {
-				fmt.Printf("  - %v\n", err)
+				logger.Error("  - %v", err)
 			}
 			return fmt.Errorf("tgs.yaml validation failed with %d errors", len(errors))
 		}

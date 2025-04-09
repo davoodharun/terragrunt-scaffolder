@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
 	"gopkg.in/yaml.v3"
 )
 
@@ -409,7 +410,7 @@ func CreateStack(name string) error {
 		return fmt.Errorf("failed to write stack config: %w", err)
 	}
 
-	fmt.Printf("Created stack configuration: %s\n", filename)
+	logger.Success("Created stack configuration: %s", filename)
 	return nil
 }
 
@@ -423,7 +424,7 @@ func ListStacks() error {
 	fmt.Println("\nAvailable stacks:")
 	for _, file := range files {
 		if !file.IsDir() && filepath.Ext(file.Name()) == ".yaml" {
-			fmt.Printf("- %s\n", strings.TrimSuffix(file.Name(), ".yaml"))
+			logger.Info("- %s", strings.TrimSuffix(file.Name(), ".yaml"))
 		}
 	}
 

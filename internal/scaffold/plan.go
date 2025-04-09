@@ -349,12 +349,12 @@ func Plan() error {
 
 	// Print changes
 	if len(changes) == 0 {
-		fmt.Println("\nNo changes detected. Infrastructure is up to date.")
+		logger.Info("\nNo changes detected. Infrastructure is up to date.")
 		return nil
 	}
 
-	fmt.Println("\nPlanned changes:")
-	fmt.Println("================")
+	logger.Info("\nPlanned changes:")
+	logger.Info("================")
 
 	// Group changes by subscription and environment
 	bySubEnvRegion := make(map[string][]Change)
@@ -373,13 +373,13 @@ func Plan() error {
 		parts := strings.Split(key, "/")
 		if len(parts) == 1 {
 			// Subscription-level changes
-			fmt.Printf("\nSubscription: %s\n", parts[0])
-			fmt.Println(strings.Repeat("-", 40))
+			logger.Info("\nSubscription: %s", parts[0])
+			logger.Info(strings.Repeat("-", 40))
 		} else {
 			// Environment-level changes
 			sub, env, region := parts[0], parts[1], parts[2]
-			fmt.Printf("\nSubscription: %s, Environment: %s, Region: %s\n", sub, env, region)
-			fmt.Println(strings.Repeat("-", 40))
+			logger.Info("\nSubscription: %s, Environment: %s, Region: %s", sub, env, region)
+			logger.Info(strings.Repeat("-", 40))
 		}
 
 		// Group by change type
@@ -394,25 +394,25 @@ func Plan() error {
 			if len(typeChanges) > 0 {
 				switch changeType {
 				case "add":
-					fmt.Println("\n  + Additions:")
+					logger.Info("\n  + Additions:")
 				case "remove":
-					fmt.Println("\n  - Removals:")
+					logger.Info("\n  - Removals:")
 				case "modify":
-					fmt.Println("\n  ~ Modifications:")
+					logger.Info("\n  ~ Modifications:")
 				}
 
 				for _, change := range typeChanges {
 					switch change.Category {
 					case "subscription":
-						fmt.Printf("    Subscription %s: %s\n", change.Subscription, change.Details)
+						logger.Info("    Subscription %s: %s", change.Subscription, change.Details)
 					case "environment":
-						fmt.Printf("    Environment %s: %s\n", change.Environment, change.Details)
+						logger.Info("    Environment %s: %s", change.Environment, change.Details)
 					case "component":
-						fmt.Printf("    %s: %s\n", change.Component, change.Details)
+						logger.Info("    %s: %s", change.Component, change.Details)
 					case "app":
-						fmt.Printf("    %s/%s: %s\n", change.Component, change.App, change.Details)
+						logger.Info("    %s/%s: %s", change.Component, change.App, change.Details)
 					case "config":
-						fmt.Printf("    %s: %s\n", change.Component, change.Details)
+						logger.Info("    %s: %s", change.Component, change.Details)
 					}
 				}
 			}

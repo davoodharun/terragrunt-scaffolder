@@ -8,7 +8,6 @@ import (
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
 	"github.com/davoodharun/terragrunt-scaffolder/internal/logger"
-	"github.com/davoodharun/terragrunt-scaffolder/internal/validate"
 	"gopkg.in/yaml.v3"
 )
 
@@ -66,161 +65,103 @@ func initSchemaCache() (*SchemaCache, error) {
 	return schemaCache, nil
 }
 
-// Update the function to get the infrastructure path
-func getInfrastructurePath() string {
-	// Get the current working directory
-	cwd, err := os.Getwd()
+// Generate creates the infrastructure directory structure and files
+func Generate(tgsConfig *config.TGSConfig) error {
+	// Calculate total steps for progress bar
+	totalSteps := 1 // root.hcl
+	totalSteps++    // environment configs
+
+	// Count regions per environment
+	regionCount := 0
+	stackName := "main"
+	mainConfig, err := ReadMainConfig(stackName)
 	if err != nil {
-		logger.Warning("Failed to get current working directory: %v", err)
-		return ".infrastructure"
+		logger.Error("Failed to read stack config %s: %v", stackName, err)
+		return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
 	}
+	regionCount = len(mainConfig.Stack.Architecture.Regions)
 
-	// Check if .infrastructure exists in the current directory
-	infraPath := filepath.Join(cwd, ".infrastructure")
-	if _, err := os.Stat(infraPath); err == nil {
-		return infraPath
+	// Add steps for each environment's regions
+	for _, sub := range tgsConfig.Subscriptions {
+		totalSteps += len(sub.Environments) * regionCount
 	}
+	totalSteps++ // components generation
 
-	// If not found, create it
-	if err := os.MkdirAll(infraPath, 0755); err != nil {
-		logger.Warning("Failed to create .infrastructure directory: %v", err)
-		return ".infrastructure"
-	}
+	logger.StartProgress("Generating infrastructure", totalSteps)
+	logger.Info("Starting infrastructure generation")
 
-	return infraPath
-}
-
-// Generate scaffolds the infrastructure based on the TGS configuration
-func Generate() error {
-	// Read TGS configuration
-	tgsConfig, err := config.ReadTGSConfig()
-	if err != nil {
-		return fmt.Errorf("failed to read TGS config: %w", err)
-	}
-
-	// Validate TGS configuration
-	if errors := validate.ValidateTGSConfig(tgsConfig); len(errors) > 0 {
-		return fmt.Errorf("invalid TGS configuration: %v", errors[0])
-	}
-
-	logger.Info("Creating infrastructure directory structure")
-
-	// Create infrastructure directory if it doesn't exist
+	// Create infrastructure directory
 	infraPath := ".infrastructure"
-	if err := os.MkdirAll(infraPath, 0755); err != nil {
+	if err := createDirectory(infraPath); err != nil {
+		logger.Error("Failed to create infrastructure directory: %v", err)
 		return fmt.Errorf("failed to create infrastructure directory: %w", err)
 	}
+	logger.Success("Infrastructure folder created at %s", infraPath)
 
-	// Create config directory
-	configDir := filepath.Join(infraPath, "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+	// Create required directories
+	dirs := []string{
+		filepath.Join(infraPath, "config"),
+		filepath.Join(infraPath, "_components"),
+		filepath.Join(infraPath, "architecture"),
 	}
 
-	// Create components directory
-	componentsDir := filepath.Join(infraPath, "_components")
-	if err := os.MkdirAll(componentsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create components directory: %w", err)
-	}
-
-	// Create architecture directory
-	architectureDir := filepath.Join(infraPath, "architecture")
-	if err := os.MkdirAll(architectureDir, 0755); err != nil {
-		return fmt.Errorf("failed to create architecture directory: %w", err)
-	}
-
-	logger.Success("Infrastructure directory structure created")
-
-	// Calculate total steps for progress bar
-	totalSteps := 0
-	// Count components
-	for _, sub := range tgsConfig.Subscriptions {
-		for _, env := range sub.Environments {
-			stackName := "main"
-			if env.Stack != "" {
-				stackName = env.Stack
-			}
-			mainConfig, err := config.ReadMainConfig(stackName)
-			if err != nil {
-				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
-			}
-			totalSteps += len(mainConfig.Stack.Components)
+	for _, dir := range dirs {
+		if err := createDirectory(dir); err != nil {
+			logger.Error("Failed to create directory %s: %v", dir, err)
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
+		logger.Success("Created directory: %s", dir)
 	}
-	// Add steps for root.hcl, environment configs, and architecture
-	totalSteps += 1 + len(tgsConfig.Subscriptions) + len(tgsConfig.Subscriptions)
 
-	// Initialize progress bar
-	logger.StartProgress("Generating infrastructure", totalSteps)
-
-	// Generate root.hcl file
+	// Generate root.hcl
 	logger.Info("Generating root.hcl configuration")
 	if err := generateRootHCL(tgsConfig, infraPath); err != nil {
+		logger.Error("Failed to generate root.hcl: %v", err)
 		return fmt.Errorf("failed to generate root.hcl: %w", err)
 	}
-	logger.Success("Root.hcl configuration generated")
+	logger.Success("Generated root.hcl configuration")
 	logger.UpdateProgress()
 
-	// Generate environment configurations
+	// Generate environment configs
 	logger.Info("Generating environment configurations")
 	if err := generateEnvironmentConfigs(tgsConfig, infraPath); err != nil {
+		logger.Error("Failed to generate environment configs: %v", err)
 		return fmt.Errorf("failed to generate environment configs: %w", err)
 	}
-	logger.Success("Environment configurations generated")
+	logger.Success("Generated environment configurations")
 	logger.UpdateProgress()
 
-	// Generate architecture and components for each subscription and environment
+	// Process each subscription and environment
 	for subName, sub := range tgsConfig.Subscriptions {
+		logger.Info("Processing subscription: %s", subName)
 		for _, env := range sub.Environments {
-			stackName := "main"
-			if env.Stack != "" {
-				stackName = env.Stack
-			}
-			mainConfig, err := config.ReadMainConfig(stackName)
-			if err != nil {
-				return fmt.Errorf("failed to read stack config %s: %w", stackName, err)
-			}
+			logger.Info("Processing environment: %s in subscription %s", env.Name, subName)
 
-			// Process each region in the stack configuration
+			// Generate environment-specific files
 			for region, components := range mainConfig.Stack.Architecture.Regions {
-				logger.Info("Generating architecture for %s/%s/%s", subName, env.Name, region)
-				// Generate architecture
+				logger.Info("Generating files for region %s", region)
 				if err := generateEnvironment(subName, region, env.Name, components, infraPath); err != nil {
+					logger.Error("Failed to generate environment for %s/%s: %v", subName, env.Name, err)
 					return fmt.Errorf("failed to generate environment for %s/%s: %w", subName, env.Name, err)
 				}
-				logger.Success("Architecture generated for %s/%s/%s", subName, env.Name, region)
-				logger.UpdateProgress()
-
-				logger.Info("Generating components for %s/%s/%s", subName, env.Name, region)
-				// Generate components
-				if err := generateComponents(mainConfig, infraPath); err != nil {
-					return fmt.Errorf("failed to generate components: %w", err)
-				}
-				logger.Success("Components generated for %s/%s/%s", subName, env.Name, region)
+				logger.Success("Generated files for %s/%s/%s", subName, env.Name, region)
 				logger.UpdateProgress()
 			}
 		}
 	}
 
-	// Finish progress bar
+	// Generate components
+	logger.Info("Generating components")
+	if err := generateComponents(mainConfig, infraPath); err != nil {
+		logger.Error("Failed to generate components: %v", err)
+		return fmt.Errorf("failed to generate components: %w", err)
+	}
+	logger.Success("Components generated successfully")
+	logger.UpdateProgress()
+
 	logger.FinishProgress()
 	logger.Success("Infrastructure generation completed successfully")
-
 	return nil
-}
-
-func cleanupSchemaCache() {
-	if schemaCache != nil {
-		// Clean up .terraform directory
-		tfDir := filepath.Join(schemaCache.CachePath, ".terraform")
-		if err := os.RemoveAll(tfDir); err != nil {
-			fmt.Printf("Warning: failed to remove .terraform directory: %v\n", err)
-		}
-		// Clean up cache directory
-		if err := os.RemoveAll(schemaCache.CachePath); err != nil {
-			fmt.Printf("Warning: failed to remove cache directory: %v\n", err)
-		}
-	}
 }
 
 // ReadMainConfig reads the stack configuration from the .tgs/stacks directory
@@ -340,4 +281,21 @@ func getEnvironmentPrefix(env string) string {
 	}
 
 	return "E" // Default fallback
+}
+
+// createDirectory creates a directory and its parents if they don't exist
+func createDirectory(path string) error {
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", path, err)
+	}
+	return nil
+}
+
+// joinPath joins path elements and creates the directory if it doesn't exist
+func joinPath(elem ...string) (string, error) {
+	path := filepath.Join(elem...)
+	if err := createDirectory(path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
