@@ -12,34 +12,161 @@ import (
 )
 
 func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
-	// Get the components directory
-	componentsDir := filepath.Join(infraPath, "_components")
+	// Initialize template renderer
+	renderer, err := templates.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to initialize template renderer: %w", err)
+	}
 
-	// Create a map to track which components have been validated
+	// Read TGS config to get naming format
+	tgsConfig, err := config.ReadTGSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to read TGS config: %w", err)
+	}
+
+	// Create components directory
+	componentsDir := filepath.Join(infraPath, "_components")
+	if err := os.MkdirAll(componentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create components directory: %w", err)
+	}
+
+	// Create stack-specific components directory
+	stackComponentsDir := filepath.Join(componentsDir, mainConfig.Stack.Name)
+	if err := os.MkdirAll(stackComponentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create stack components directory: %w", err)
+	}
+
+	// Track validated components to avoid duplicate messages
 	validatedComponents := make(map[string]bool)
 
-	// Process components in dependency order
+	// Get all environments for this stack
+	var environments []string
+	for _, sub := range tgsConfig.Subscriptions {
+		for _, env := range sub.Environments {
+			stackToCheck := "main"
+			if env.Stack != "" {
+				stackToCheck = env.Stack
+			}
+			if stackToCheck == mainConfig.Stack.Name {
+				environments = append(environments, env.Name)
+			}
+		}
+	}
+
+	// Generate component files
 	for compName, comp := range mainConfig.Stack.Components {
-		// Skip if already validated
 		if validatedComponents[compName] {
 			continue
 		}
 
 		// Create component directory
-		componentPath := filepath.Join(componentsDir, compName)
+		componentPath := filepath.Join(stackComponentsDir, compName)
 		if err := os.MkdirAll(componentPath, 0755); err != nil {
-			return fmt.Errorf("failed to create component directory for %s: %w", compName, err)
+			return fmt.Errorf("failed to create component directory: %w", err)
 		}
 
-		// Generate component files
-		if err := generateComponentFiles(compName, comp, componentPath); err != nil {
-			return fmt.Errorf("failed to generate component files for %s: %w", compName, err)
+		// Generate Terraform files
+		if err := generateTerraformFiles(componentPath, comp); err != nil {
+			return fmt.Errorf("failed to generate terraform files: %w", err)
+		}
+
+		// Use only explicit dependencies from the stack file
+		var dependencyBlocks string
+		if len(comp.Deps) > 0 {
+			deps := generateDependencyBlocks(comp.Deps, infraPath)
+			dependencyBlocks = deps
+		}
+
+		// Prepare component data
+		componentData := &templates.ComponentData{
+			StackName:        mainConfig.Stack.Name,
+			ComponentName:    compName,
+			Source:           comp.Source,
+			Version:          comp.Version,
+			ResourceType:     getResourceTypeAbbreviation(compName),
+			DependencyBlocks: dependencyBlocks,
+			EnvConfigInputs:  generateEnvConfigInputs(comp),
+			NamingFormat:     tgsConfig.Naming.Format,
+		}
+
+		// Render component.hcl template
+		componentHcl, err := renderer.RenderTemplate("components/component.hcl.tmpl", componentData)
+		if err != nil {
+			return fmt.Errorf("failed to render component.hcl template: %w", err)
+		}
+
+		// Write component.hcl file
+		if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
+			return fmt.Errorf("failed to create component.hcl: %w", err)
+		}
+
+		// Generate app settings structure if enabled
+		if comp.AppSettings {
+			// Get apps for this component from the architecture config
+			var apps []string
+			appMap := make(map[string]bool) // Use map to deduplicate apps
+
+			// Ensure we have a valid architecture configuration
+			if mainConfig.Stack.Architecture.Regions == nil {
+				logger.Warning("No regions defined in architecture configuration for component %s", compName)
+				return nil
+			}
+
+			for _, regionComps := range mainConfig.Stack.Architecture.Regions {
+				for _, regionComp := range regionComps {
+					if regionComp.Component == compName {
+						for _, app := range regionComp.Apps {
+							if !appMap[app] {
+								apps = append(apps, app)
+								appMap[app] = true
+							}
+						}
+					}
+				}
+			}
+
+			if err := generateAppSettingsStructure(compName, infraPath, tgsConfig, apps); err != nil {
+				return fmt.Errorf("failed to generate app settings structure: %w", err)
+			}
+		}
+
+		// Generate policy files structure if enabled
+		if comp.PolicyFiles {
+			// Get apps for this component from the architecture config
+			var apps []string
+			appMap := make(map[string]bool) // Use map to deduplicate apps
+
+			// Ensure we have a valid architecture configuration
+			if mainConfig.Stack.Architecture.Regions == nil {
+				logger.Warning("No regions defined in architecture configuration for component %s", compName)
+				return nil
+			}
+
+			for _, regionComps := range mainConfig.Stack.Architecture.Regions {
+				for _, regionComp := range regionComps {
+					if regionComp.Component == compName {
+						for _, app := range regionComp.Apps {
+							if !appMap[app] {
+								apps = append(apps, app)
+								appMap[app] = true
+							}
+						}
+					}
+				}
+			}
+
+			if err := generatePolicyFilesStructure(compName, infraPath, tgsConfig, apps); err != nil {
+				return fmt.Errorf("failed to generate policy files structure: %w", err)
+			}
 		}
 
 		// Validate component structure
 		if err := ValidateComponentStructure(componentPath); err != nil {
 			return fmt.Errorf("component structure validation failed for %s: %w", compName, err)
 		}
+
+		logger.Success("Generated and validated component: %s", compName)
+		logger.UpdateProgress()
 
 		// Mark this component as validated
 		validatedComponents[compName] = true
@@ -409,57 +536,6 @@ func generatePolicyFilesStructure(compName string, infraPath string, tgsConfig *
 	policyHCLPath := filepath.Join(policyFilesDir, "policies.hcl")
 	if err := createFile(policyHCLPath, policyContent); err != nil {
 		return fmt.Errorf("failed to create policies.hcl file: %w", err)
-	}
-
-	return nil
-}
-
-// generateComponentFiles generates the files for a component
-func generateComponentFiles(compName string, comp config.Component, componentPath string) error {
-	// Initialize template renderer
-	renderer, err := templates.NewRenderer()
-	if err != nil {
-		return fmt.Errorf("failed to initialize template renderer: %w", err)
-	}
-
-	// Read TGS config to get naming format
-	tgsConfig, err := config.ReadTGSConfig()
-	if err != nil {
-		return fmt.Errorf("failed to read TGS config: %w", err)
-	}
-
-	// Generate Terraform files
-	if err := generateTerraformFiles(componentPath, comp); err != nil {
-		return fmt.Errorf("failed to generate terraform files: %w", err)
-	}
-
-	// Use only explicit dependencies from the stack file
-	var dependencyBlocks string
-	if len(comp.Deps) > 0 {
-		deps := generateDependencyBlocks(comp.Deps, ".infrastructure")
-		dependencyBlocks = deps
-	}
-
-	// Prepare component data
-	componentData := &templates.ComponentData{
-		ComponentName:    compName,
-		Source:           comp.Source,
-		Version:          comp.Version,
-		ResourceType:     getResourceTypeAbbreviation(compName),
-		DependencyBlocks: dependencyBlocks,
-		EnvConfigInputs:  generateEnvConfigInputs(comp),
-		NamingFormat:     tgsConfig.Naming.Format,
-	}
-
-	// Render component.hcl template
-	componentHcl, err := renderer.RenderTemplate("components/component.hcl.tmpl", componentData)
-	if err != nil {
-		return fmt.Errorf("failed to render component.hcl template: %w", err)
-	}
-
-	// Write component.hcl file
-	if err := createFile(filepath.Join(componentPath, "component.hcl"), componentHcl); err != nil {
-		return fmt.Errorf("failed to create component.hcl: %w", err)
 	}
 
 	return nil
