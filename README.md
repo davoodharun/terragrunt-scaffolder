@@ -291,41 +291,98 @@ The tool uses the following directory structure:
 │       └── localdev.yaml       # Local development stack
 │
 └── .infrastructure/            # Generated infrastructure code
+    ├── architecture/           # Infrastructure architecture
+    │   ├── nonprod/           # Non-production subscription
+    │   │   ├── subscription.hcl    # Subscription-level configuration
+    │   │   ├── eastus2/            # Region
+    │   │   │   ├── region.hcl      # Region-level configuration
+    │   │   │   ├── dev/            # Environment
+    │   │   │   │   ├── environment.hcl  # Environment-level configuration
+    │   │   │   │   ├── appservice/ # Component
+    │   │   │   │   │   ├── api/    # App
+    │   │   │   │   │   │   └── terragrunt.hcl  # App-specific configuration
+    │   │   │   │   │   └── web/    # App
+    │   │   │   │   │       └── terragrunt.hcl  # App-specific configuration
+    │   │   │   │   └── ...         # Other components
+    │   │   │   └── test/           # Environment
+    │   │   │       ├── environment.hcl  # Environment-level configuration
+    │   │   │       └── ...         # Components and apps
+    │   │   └── westus2/            # Region
+    │   │       ├── region.hcl      # Region-level configuration
+    │   │       └── ...             # Environments and components
+    │   └── prod/                   # Production subscription
+    │       ├── subscription.hcl    # Subscription-level configuration
+    │       └── ...                 # Similar structure
     ├── config/                 # Global configuration
-    │   └── global.hcl          # Global variables
+    │   ├── global.hcl          # Global variables
+    │   └── main/               # Main stack configuration
+    │       ├── environments/   # Environment-specific configurations
+    │       ├── app_settings_*/ # Component-specific app settings
+    │       │   ├── appsettings.hcl  # App settings configuration
+    │       │   ├── global.appsettings.json  # Global app settings
+    │       │   ├── nonprod/    # Non-production app settings
+    │       │   │   └── *.json  # Environment-specific settings
+    │       │   └── prod/       # Production app settings
+    │       │       └── *.json  # Environment-specific settings
+    │       └── policy_*/       # Component-specific policy files
+    │           ├── policy.hcl  # Policy configuration
+    │           ├── global.policy.json  # Global policy definitions
+    │           ├── nonprod/    # Non-production policies
+    │           │   └── *.json  # Environment-specific policies
+    │           └── prod/       # Production policies
+    │               └── *.json  # Environment-specific policies
     ├── root.hcl                # Root Terragrunt configuration
-    ├── _components/            # Component templates
-    │   ├── appservice/         # App Service component
-    │   │   ├── component.hcl   # Component-level configuration
-    │   │   ├── main.tf         # Main Terraform configuration
-    │   │   ├── variables.tf    # Input variables
-    │   │   └── provider.tf     # Provider configuration
-    │   ├── rediscache/         # Redis Cache component
-    │   │   ├── component.hcl   # Component-level configuration
-    │   │   ├── main.tf         # Main Terraform configuration
-    │   │   ├── variables.tf    # Input variables
-    │   │   └── provider.tf     # Provider configuration
-    │   └── ...                 # Other components
-    ├── nonprod/                # Non-production subscription
-    │   ├── subscription.hcl    # Subscription-level configuration
-    │   ├── eastus2/            # Region
-    │   │   ├── region.hcl      # Region-level configuration
-    │   │   ├── dev/            # Environment
-    │   │   │   ├── environment.hcl  # Environment-level configuration
-    │   │   │   ├── appservice/ # Component
-    │   │   │   │   ├── api/    # App
-    │   │   │   │   └── web/    # App
-    │   │   │   └── ...         # Other components
-    │   │   └── test/           # Environment
-    │   │       ├── environment.hcl  # Environment-level configuration
-    │   │       └── ...         # Components and apps
-    │   └── westus/             # Region
-    │       ├── region.hcl      # Region-level configuration
-    │       └── ...             # Environments and components
-    └── prod/                   # Production subscription
-        ├── subscription.hcl    # Subscription-level configuration
-        └── ...                 # Similar structure
+    └── _components/            # Component templates
+        └── main/              # Main stack components
+            ├── appservice/    # App Service component
+            │   ├── component.hcl   # Component-level configuration
+            │   ├── main.tf         # Main Terraform configuration
+            │   ├── variables.tf    # Input variables
+            │   └── provider.tf     # Provider configuration
+            ├── appservice_api/ # App Service API component
+            │   ├── component.hcl   # Component-level configuration
+            │   ├── main.tf         # Main Terraform configuration
+            │   ├── variables.tf    # Input variables
+            │   └── provider.tf     # Provider configuration
+            ├── rediscache/     # Redis Cache component
+            │   ├── component.hcl   # Component-level configuration
+            │   ├── main.tf         # Main Terraform configuration
+            │   ├── variables.tf    # Input variables
+            │   └── provider.tf     # Provider configuration
+            └── serviceplan/    # Service Plan component
+                ├── component.hcl   # Component-level configuration
+                ├── main.tf         # Main Terraform configuration
+                ├── variables.tf    # Input variables
+                └── provider.tf     # Provider configuration
 ```
+
+### Component Configuration Options
+
+When defining components in your stack configuration (`main.yaml`), you can enable app settings and policy files generation using the following options:
+
+```yaml
+stack:
+  components:
+    appservice_api:
+      source: azurerm_linux_web_app
+      app_settings: true      # Enable app settings generation
+      policy_files: true      # Enable policy files generation
+      provider: azurerm
+      version: 3.0.0
+      description: Backend API service
+```
+
+- `app_settings: true` - When enabled, generates:
+  - App settings configuration in `.infrastructure/config/main/app_settings_<component>/`
+  - Environment-specific app settings JSON files
+  - Global app settings configuration
+
+- `policy_files: true` - When enabled, generates:
+  - Policy configuration in `.infrastructure/config/main/policy_<component>/`
+  - Environment-specific policy JSON files
+  - Global policy definitions
+
+These options allow you to manage app settings and policies separately from the main infrastructure code, making it easier to maintain environment-specific configurations.
 
 ## Configuration Files
 
