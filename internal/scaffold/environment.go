@@ -51,8 +51,14 @@ func generateEnvironment(subscription, region string, envName string, components
 		return fmt.Errorf("failed to create architecture directory: %w", err)
 	}
 
+	// Create stack folder within architecture
+	stackPath := filepath.Join(architecturePath, stackName)
+	if err := os.MkdirAll(stackPath, 0755); err != nil {
+		return fmt.Errorf("failed to create stack directory: %w", err)
+	}
+
 	// Create environment base path
-	basePath := filepath.Join(architecturePath, subscription, region, envName)
+	basePath := filepath.Join(stackPath, subscription, region, envName)
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return fmt.Errorf("failed to create environment directory: %w", err)
 	}
@@ -67,7 +73,7 @@ func generateEnvironment(subscription, region string, envName string, components
 	}
 
 	// Create region.hcl in the region directory
-	regionPath := filepath.Join(architecturePath, subscription, region)
+	regionPath := filepath.Join(stackPath, subscription, region)
 	if err := os.MkdirAll(regionPath, 0755); err != nil {
 		return fmt.Errorf("failed to create region directory: %w", err)
 	}
@@ -81,7 +87,7 @@ func generateEnvironment(subscription, region string, envName string, components
 	}
 
 	// Create subscription.hcl in the subscription directory
-	subPath := filepath.Join(architecturePath, subscription)
+	subPath := filepath.Join(stackPath, subscription)
 	if err := os.MkdirAll(subPath, 0755); err != nil {
 		return fmt.Errorf("failed to create subscription directory: %w", err)
 	}

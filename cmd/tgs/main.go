@@ -352,7 +352,8 @@ var scaffoldCmd = &cobra.Command{
 // Generate diagram command
 var diagramCmd = &cobra.Command{
 	Use:   "diagram",
-	Short: "Generate a Mermaid diagram of the infrastructure layout",
+	Short: "Generate infrastructure diagrams",
+	Long:  `Generate both PlantUML architectural diagrams and a folder structure tree diagram that shows the complete infrastructure layout`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return diagram.GenerateDiagram()
 	},

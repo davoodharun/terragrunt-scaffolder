@@ -125,7 +125,7 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 				}
 			}
 
-			if err := generateAppSettingsStructure(compName, infraPath, tgsConfig, apps); err != nil {
+			if err := generateAppSettingsStructure(compName, infraPath, tgsConfig, apps, mainConfig.Stack.Name); err != nil {
 				return fmt.Errorf("failed to generate app settings structure: %w", err)
 			}
 		}
@@ -155,7 +155,7 @@ func generateComponents(mainConfig *config.MainConfig, infraPath string) error {
 				}
 			}
 
-			if err := generatePolicyFilesStructure(compName, infraPath, tgsConfig, apps); err != nil {
+			if err := generatePolicyFilesStructure(compName, infraPath, tgsConfig, apps, mainConfig.Stack.Name); err != nil {
 				return fmt.Errorf("failed to generate policy files structure: %w", err)
 			}
 		}
@@ -372,14 +372,14 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 			if app == "" || app == "{app}" {
 				if app == "{app}" {
 					// App-specific dependency using current app
-					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s/${local.app_name}", region, component)
+					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.stack_name}/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s/${local.app_name}", region, component)
 				} else {
 					// Component-level dependency
-					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s", region, component)
+					configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.stack_name}/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s", region, component)
 				}
 			} else {
 				// App-specific dependency with fixed app name
-				configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s/%s", region, component, app)
+				configPath = fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.stack_name}/${local.subscription_vars.locals.subscription_name}/%s/${local.environment_vars.locals.environment_name}/%s/%s", region, component, app)
 				depName = fmt.Sprintf("%s_%s", component, app)
 			}
 
@@ -402,7 +402,7 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 			blocks = append(blocks, block)
 		} else {
 			// Handle analyzed dependencies (component name only)
-			configPath := fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.subscription_vars.locals.subscription_name}/${local.region_vars.locals.region_name}/${local.environment_vars.locals.environment_name}/%s", dep)
+			configPath := fmt.Sprintf("${get_repo_root()}/.infrastructure/architecture/${local.stack_name}/${local.subscription_vars.locals.subscription_name}/${local.region_vars.locals.region_name}/${local.environment_vars.locals.environment_name}/%s", dep)
 
 			// Ensure unique dependency name
 			depName := dep
@@ -428,9 +428,9 @@ func generateDependencyBlocks(deps []string, infraPath string) string {
 }
 
 // generateAppSettingsStructure creates the app settings folder structure for a component
-func generateAppSettingsStructure(compName string, infraPath string, tgsConfig *config.TGSConfig, apps []string) error {
+func generateAppSettingsStructure(compName string, infraPath string, tgsConfig *config.TGSConfig, apps []string, stackName string) error {
 	// Create app settings directory under the stack's config folder
-	appSettingsDir := filepath.Join(infraPath, "config", "main", "app_settings_"+compName)
+	appSettingsDir := filepath.Join(infraPath, "config", stackName, "app_settings_"+compName)
 	if err := os.MkdirAll(appSettingsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create app settings directory: %w", err)
 	}
@@ -450,6 +450,15 @@ func generateAppSettingsStructure(compName string, infraPath string, tgsConfig *
 	// Create subscription and environment folders
 	for subName, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
+			// Skip this environment if it doesn't belong to this stack
+			envStack := "main"
+			if env.Stack != "" {
+				envStack = env.Stack
+			}
+			if envStack != stackName {
+				continue
+			}
+
 			// Create environment directory
 			envDir := filepath.Join(appSettingsDir, subName, env.Name)
 			if err := os.MkdirAll(envDir, 0755); err != nil {
@@ -475,7 +484,7 @@ func generateAppSettingsStructure(compName string, infraPath string, tgsConfig *
 	// Generate appsettings.hcl file
 	appSettingsData := templates.AppSettingsData{
 		ComponentName: compName,
-		StackName:     "main", // TODO: Get this from the stack config
+		StackName:     stackName,
 	}
 	appSettingsContent, err := renderer.RenderTemplate("appsettings.hcl.tmpl", appSettingsData)
 	if err != nil {
@@ -491,9 +500,9 @@ func generateAppSettingsStructure(compName string, infraPath string, tgsConfig *
 }
 
 // generatePolicyFilesStructure creates the policy files folder structure for a component
-func generatePolicyFilesStructure(compName string, infraPath string, tgsConfig *config.TGSConfig, apps []string) error {
+func generatePolicyFilesStructure(compName string, infraPath string, tgsConfig *config.TGSConfig, apps []string, stackName string) error {
 	// Create policy files directory under the stack's config folder
-	policyFilesDir := filepath.Join(infraPath, "config", "main", "policy_files_"+compName)
+	policyFilesDir := filepath.Join(infraPath, "config", stackName, "policy_files_"+compName)
 	if err := os.MkdirAll(policyFilesDir, 0755); err != nil {
 		return fmt.Errorf("failed to create policy files directory: %w", err)
 	}
@@ -507,6 +516,15 @@ func generatePolicyFilesStructure(compName string, infraPath string, tgsConfig *
 	// Create subscription and environment folders
 	for subName, sub := range tgsConfig.Subscriptions {
 		for _, env := range sub.Environments {
+			// Skip this environment if it doesn't belong to this stack
+			envStack := "main"
+			if env.Stack != "" {
+				envStack = env.Stack
+			}
+			if envStack != stackName {
+				continue
+			}
+
 			// Create environment directory
 			envDir := filepath.Join(policyFilesDir, subName, env.Name)
 			if err := os.MkdirAll(envDir, 0755); err != nil {
@@ -526,7 +544,7 @@ func generatePolicyFilesStructure(compName string, infraPath string, tgsConfig *
 	// Generate policies.hcl file
 	policyData := templates.PolicyData{
 		ComponentName: compName,
-		StackName:     "main", // TODO: Get this from the stack config
+		StackName:     stackName,
 	}
 	policyContent, err := renderer.RenderTemplate("policies.hcl.tmpl", policyData)
 	if err != nil {
