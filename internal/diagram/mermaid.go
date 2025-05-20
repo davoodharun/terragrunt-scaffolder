@@ -82,10 +82,13 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 		deps                             []string
 		isDataFlow                       bool
 	})
+	// For uniqueness: map baseID to count
+	baseIDCount := make(map[string]int)
+	// For reverse lookup: map base info to unique node ID
+	type nodeKey struct{ component, sub, region, env, app string }
+	nodeKeyToID := make(map[nodeKey]string)
 
-	// Only include subscriptions and regions for this environment
 	for subName, sub := range tgsConfig.Subscriptions {
-		// Only include this subscription if it has the target environment for this stack
 		foundEnv := false
 		for _, env := range sub.Environments {
 			stackMatch := stackName
@@ -115,26 +118,38 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 				for _, comp := range comps {
 					if len(comp.Apps) > 0 {
 						for _, app := range comp.Apps {
-							id := nodeID(comp.Component, subName, region, env.Name, app)
+							baseID := nodeID(comp.Component, subName, region, env.Name, "")
+							baseIDCount[baseID]++
+							uniqueID := baseID
+							if baseIDCount[baseID] > 1 {
+								uniqueID = fmt.Sprintf("%s_%d", baseID, baseIDCount[baseID])
+							}
 							icon := getMermaidIcon(comp.Component)
 							label := app
-							diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", id, icon, label))
-							nodeMap[id] = struct {
+							diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", uniqueID, icon, label))
+							nodeMap[uniqueID] = struct {
 								sub, region, env, component, app string
 								deps                             []string
 								isDataFlow                       bool
 							}{subName, region, env.Name, comp.Component, app, mainConfig.Stack.Components[comp.Component].Deps, comp.Component == "rediscache" || comp.Component == "cosmos_db" || comp.Component == "servicebus"}
+							nodeKeyToID[nodeKey{comp.Component, subName, region, env.Name, app}] = uniqueID
 						}
 					} else {
-						id := nodeID(comp.Component, subName, region, env.Name, "")
+						baseID := nodeID(comp.Component, subName, region, env.Name, "")
+						baseIDCount[baseID]++
+						uniqueID := baseID
+						if baseIDCount[baseID] > 1 {
+							uniqueID = fmt.Sprintf("%s_%d", baseID, baseIDCount[baseID])
+						}
 						icon := getMermaidIcon(comp.Component)
 						label := comp.Component
-						diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", id, icon, label))
-						nodeMap[id] = struct {
+						diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", uniqueID, icon, label))
+						nodeMap[uniqueID] = struct {
 							sub, region, env, component, app string
 							deps                             []string
 							isDataFlow                       bool
 						}{subName, region, env.Name, comp.Component, "", mainConfig.Stack.Components[comp.Component].Deps, comp.Component == "rediscache" || comp.Component == "cosmos_db" || comp.Component == "servicebus"}
+						nodeKeyToID[nodeKey{comp.Component, subName, region, env.Name, ""}] = uniqueID
 					}
 				}
 				diagram.WriteString("    end\n")
@@ -157,15 +172,14 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 				if depRegion == "{region}" {
 					depRegion = n.region
 				}
-				depID := ""
+				lookupKey := nodeKey{depComp, n.sub, depRegion, n.env, ""}
 				if depApp != "" && depApp != "{app}" {
-					depID = nodeID(depComp, n.sub, depRegion, n.env, depApp)
+					lookupKey = nodeKey{depComp, n.sub, depRegion, n.env, depApp}
 				} else if depApp == "{app}" && n.app != "" {
-					depID = nodeID(depComp, n.sub, depRegion, n.env, n.app)
-				} else {
-					depID = nodeID(depComp, n.sub, depRegion, n.env, "")
+					lookupKey = nodeKey{depComp, n.sub, depRegion, n.env, n.app}
 				}
-				if _, exists := nodeMap[depID]; exists {
+				depID, exists := nodeKeyToID[lookupKey]
+				if exists {
 					if n.isDataFlow {
 						diagram.WriteString(fmt.Sprintf("%s -.-> %s\n", id, depID))
 					} else {
