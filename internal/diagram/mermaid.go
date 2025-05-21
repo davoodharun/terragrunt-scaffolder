@@ -185,6 +185,9 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 					depApp := ""
 					if len(parts) > 2 {
 						depApp = parts[2]
+						if depApp == "{app}" {
+							depApp = n.app
+						}
 					}
 					depCompName := depComp
 					if compCfg, ok := mainConfig.Stack.Components[depComp]; ok {
@@ -231,6 +234,9 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 				depApp := ""
 				if len(parts) > 2 {
 					depApp = parts[2]
+					if depApp == "{app}" {
+						depApp = n.app
+					}
 				}
 				// Find the node ID for this dependency
 				depID := ""
@@ -308,6 +314,9 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 						depApp := ""
 						if len(parts) > 2 {
 							depApp = parts[2]
+							if depApp == "{app}" {
+								depApp = n.app
+							}
 						}
 						depCompName := depComp
 						if compCfg, ok := mainConfig.Stack.Components[depComp]; ok {
