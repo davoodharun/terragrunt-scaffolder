@@ -125,7 +125,7 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 								uniqueID = fmt.Sprintf("%s_%d", baseID, baseIDCount[baseID])
 							}
 							icon := getMermaidIcon(comp.Component)
-							label := app
+							label := fmt.Sprintf("%s (%s)", app, comp.Component)
 							diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", uniqueID, icon, label))
 							nodeMap[uniqueID] = struct {
 								sub, region, env, component, app string
@@ -142,7 +142,7 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 							uniqueID = fmt.Sprintf("%s_%d", baseID, baseIDCount[baseID])
 						}
 						icon := getMermaidIcon(comp.Component)
-						label := comp.Component
+						label := fmt.Sprintf("%s (%s)", comp.Component, comp.Component)
 						diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", uniqueID, icon, label))
 						nodeMap[uniqueID] = struct {
 							sub, region, env, component, app string
@@ -158,40 +158,61 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 		diagram.WriteString("  end\n\n")
 	}
 
-	// Draw dependencies only between nodes present in this environment
-	for id, n := range nodeMap {
-		for _, dep := range n.deps {
-			parts := strings.Split(dep, ".")
-			if len(parts) >= 2 {
-				depRegion := parts[0]
-				depComp := parts[1]
-				depApp := ""
-				if len(parts) > 2 {
-					depApp = parts[2]
-				}
-				if depRegion == "{region}" {
-					depRegion = n.region
-				}
-				lookupKey := nodeKey{depComp, n.sub, depRegion, n.env, ""}
-				if depApp != "" && depApp != "{app}" {
-					lookupKey = nodeKey{depComp, n.sub, depRegion, n.env, depApp}
-				} else if depApp == "{app}" && n.app != "" {
-					lookupKey = nodeKey{depComp, n.sub, depRegion, n.env, n.app}
-				}
-				depID, exists := nodeKeyToID[lookupKey]
-				if exists {
-					if n.isDataFlow {
-						diagram.WriteString(fmt.Sprintf("%s -.-> %s\n", id, depID))
+	diagram.WriteString("\nclassDef azure fill:#0072C6,stroke:#0072C6,color:white\n\n")
+	diagram.WriteString("```\n")
+
+	// Write dependency summary in Markdown
+	diagram.WriteString("\n## Component Dependencies\n\n")
+	for _, n := range nodeMap {
+		displayName := ""
+		if n.app != "" {
+			displayName = fmt.Sprintf("%s (%s) [%s]", n.app, n.component, n.region)
+		} else {
+			displayName = fmt.Sprintf("%s (%s) [%s]", n.component, n.component, n.region)
+		}
+		if len(n.deps) == 0 {
+			diagram.WriteString(fmt.Sprintf("- `%s` has no dependencies\n", displayName))
+		} else {
+			var depNames []string
+			for _, dep := range n.deps {
+				parts := strings.Split(dep, ".")
+				if len(parts) >= 2 {
+					depRegion := parts[0]
+					if depRegion == "{region}" {
+						depRegion = n.region
+					}
+					depComp := parts[1]
+					depApp := ""
+					if len(parts) > 2 {
+						depApp = parts[2]
+					}
+					if depApp != "" && depApp != "{app}" {
+						depNames = append(depNames, fmt.Sprintf("%s (%s) [%s]", depApp, depComp, depRegion))
 					} else {
-						diagram.WriteString(fmt.Sprintf("%s --> %s\n", id, depID))
+						depNames = append(depNames, fmt.Sprintf("%s (%s) [%s]", depComp, depComp, depRegion))
 					}
 				}
 			}
+			diagram.WriteString(fmt.Sprintf("- `%s` depends on: %s\n", displayName, strings.Join(depNames, ", ")))
 		}
 	}
 
-	diagram.WriteString("\nclassDef azure fill:#0072C6,stroke:#0072C6,color:white\n\n")
-	diagram.WriteString("```\n")
+	diagram.WriteString("\n## Component Summary\n\n")
+	for _, n := range nodeMap {
+		compConfig, ok := mainConfig.Stack.Components[n.component]
+		if !ok {
+			continue
+		}
+		displayName := ""
+		if n.app != "" {
+			displayName = fmt.Sprintf("%s (%s)", n.app, n.component)
+		} else {
+			displayName = fmt.Sprintf("%s", n.component)
+		}
+		diagram.WriteString(fmt.Sprintf("- `%s`\n", displayName))
+		diagram.WriteString(fmt.Sprintf("  - Provider: %s (v%s)\n", compConfig.Provider, compConfig.Version))
+		diagram.WriteString(fmt.Sprintf("  - Terraform module: %s\n", compConfig.Source))
+	}
 
 	outputPath := filepath.Join(outputDir, fmt.Sprintf("%s_%s.md", stackName, envName))
 	if err := os.WriteFile(outputPath, []byte(diagram.String()), 0644); err != nil {
