@@ -201,6 +201,131 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 		}
 	}
 
+	// --- Deployment Order Section ---
+	diagram.WriteString("\n## Deployment Order\n\n")
+	// Build dependency graph
+	type nodeInfo struct {
+		id, displayName string
+		deps            []string
+	}
+
+	graph := make(map[string]*nodeInfo)
+	idToDeps := make(map[string][]string)
+	idToDisplay := make(map[string]string)
+	for id, n := range nodeMap {
+		displayName := ""
+		if n.app != "" {
+			displayName = fmt.Sprintf("%s (%s) [%s]", n.app, n.component, n.region)
+		} else {
+			displayName = fmt.Sprintf("%s (%s) [%s]", n.component, n.component, n.region)
+		}
+		var depIDs []string
+		for _, dep := range n.deps {
+			parts := strings.Split(dep, ".")
+			if len(parts) >= 2 {
+				depRegion := parts[0]
+				if depRegion == "{region}" {
+					depRegion = n.region
+				}
+				depComp := parts[1]
+				depApp := ""
+				if len(parts) > 2 {
+					depApp = parts[2]
+				}
+				// Find the node ID for this dependency
+				depID := ""
+				for depNodeID, depNode := range nodeMap {
+					if depNode.component == depComp && depNode.region == depRegion && depNode.env == n.env && depNode.sub == n.sub {
+						if depApp != "" && depApp != "{app}" {
+							if depNode.app == depApp {
+								depID = depNodeID
+								break
+							}
+						} else if depApp == "" && depNode.app == "" {
+							depID = depNodeID
+							break
+						}
+					}
+				}
+				if depID != "" {
+					depIDs = append(depIDs, depID)
+				}
+			}
+		}
+		graph[id] = &nodeInfo{id, displayName, depIDs}
+		idToDeps[id] = depIDs
+		idToDisplay[id] = displayName
+	}
+	// Topological sort by waves
+	waves := [][]string{}
+	visited := make(map[string]bool)
+	remaining := make(map[string]bool)
+	for id := range graph {
+		remaining[id] = true
+	}
+	for len(remaining) > 0 {
+		var wave []string
+		for id := range remaining {
+			allDepsVisited := true
+			for _, dep := range idToDeps[id] {
+				if !visited[dep] {
+					allDepsVisited = false
+					break
+				}
+			}
+			if allDepsVisited {
+				wave = append(wave, id)
+			}
+		}
+		if len(wave) == 0 {
+			// Cycle detected or orphan node
+			break
+		}
+		waves = append(waves, wave)
+		for _, id := range wave {
+			visited[id] = true
+			delete(remaining, id)
+		}
+	}
+	// Output waves
+	for i, wave := range waves {
+		diagram.WriteString(fmt.Sprintf("**Wave %d:**\n", i+1))
+		for _, id := range wave {
+			n := nodeMap[id]
+			displayName := idToDisplay[id]
+			if len(n.deps) == 0 {
+				diagram.WriteString(fmt.Sprintf("- `%s` has no dependencies\n", displayName))
+			} else {
+				var depNames []string
+				for _, dep := range n.deps {
+					parts := strings.Split(dep, ".")
+					if len(parts) >= 2 {
+						depRegion := parts[0]
+						if depRegion == "{region}" {
+							depRegion = n.region
+						}
+						depComp := parts[1]
+						depApp := ""
+						if len(parts) > 2 {
+							depApp = parts[2]
+						}
+						depCompName := depComp
+						if compCfg, ok := mainConfig.Stack.Components[depComp]; ok {
+							depCompName = compCfg.Source
+						}
+						if depApp != "" && depApp != "{app}" {
+							depNames = append(depNames, fmt.Sprintf("%s (%s, %s) [%s]", depApp, depComp, depCompName, depRegion))
+						} else {
+							depNames = append(depNames, fmt.Sprintf("%s (%s, %s) [%s]", depComp, depComp, depCompName, depRegion))
+						}
+					}
+				}
+				diagram.WriteString(fmt.Sprintf("- `%s` depends on: %s\n", displayName, strings.Join(depNames, ", ")))
+			}
+		}
+		diagram.WriteString("\n")
+	}
+
 	diagram.WriteString("\n## Component Summary\n\n")
 	for _, n := range nodeMap {
 		compConfig, ok := mainConfig.Stack.Components[n.component]
