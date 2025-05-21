@@ -186,10 +186,14 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 					if len(parts) > 2 {
 						depApp = parts[2]
 					}
+					depCompName := depComp
+					if compCfg, ok := mainConfig.Stack.Components[depComp]; ok {
+						depCompName = compCfg.Source
+					}
 					if depApp != "" && depApp != "{app}" {
-						depNames = append(depNames, fmt.Sprintf("%s (%s) [%s]", depApp, depComp, depRegion))
+						depNames = append(depNames, fmt.Sprintf("%s (%s, %s) [%s]", depApp, depComp, depCompName, depRegion))
 					} else {
-						depNames = append(depNames, fmt.Sprintf("%s (%s) [%s]", depComp, depComp, depRegion))
+						depNames = append(depNames, fmt.Sprintf("%s (%s, %s) [%s]", depComp, depComp, depCompName, depRegion))
 					}
 				}
 			}
