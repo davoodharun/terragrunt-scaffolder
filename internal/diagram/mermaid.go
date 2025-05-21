@@ -163,6 +163,14 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 
 	// Write dependency summary in Markdown
 	diagram.WriteString("\n## Component Dependencies\n\n")
+	// Group nodes by component type
+	compTypeToNodes := make(map[string][]struct {
+		displayName string
+		deps        []string
+		region      string
+		app         string
+		component   string
+	})
 	for _, n := range nodeMap {
 		displayName := ""
 		if n.app != "" {
@@ -170,38 +178,52 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 		} else {
 			displayName = fmt.Sprintf("%s (%s) [%s]", n.component, n.component, n.region)
 		}
-		if len(n.deps) == 0 {
-			diagram.WriteString(fmt.Sprintf("- `%s` has no dependencies\n", displayName))
-		} else {
-			var depNames []string
-			for _, dep := range n.deps {
-				parts := strings.Split(dep, ".")
-				if len(parts) >= 2 {
-					depRegion := parts[0]
-					if depRegion == "{region}" {
-						depRegion = n.region
-					}
-					depComp := parts[1]
-					depApp := ""
-					if len(parts) > 2 {
-						depApp = parts[2]
-						if depApp == "{app}" {
-							depApp = n.app
+		compTypeToNodes[n.component] = append(compTypeToNodes[n.component], struct {
+			displayName string
+			deps        []string
+			region      string
+			app         string
+			component   string
+		}{displayName, n.deps, n.region, n.app, n.component})
+	}
+	// Output grouped summary
+	for compType, nodes := range compTypeToNodes {
+		diagram.WriteString(fmt.Sprintf("### %s\n", compType))
+		for _, n := range nodes {
+			if len(n.deps) == 0 {
+				diagram.WriteString(fmt.Sprintf("- `%s` has no dependencies\n", n.displayName))
+			} else {
+				var depNames []string
+				for _, dep := range n.deps {
+					parts := strings.Split(dep, ".")
+					if len(parts) >= 2 {
+						depRegion := parts[0]
+						if depRegion == "{region}" {
+							depRegion = n.region
+						}
+						depComp := parts[1]
+						depApp := ""
+						if len(parts) > 2 {
+							depApp = parts[2]
+							if depApp == "{app}" {
+								depApp = n.app
+							}
+						}
+						depCompName := depComp
+						if compCfg, ok := mainConfig.Stack.Components[depComp]; ok {
+							depCompName = compCfg.Source
+						}
+						if depApp != "" && depApp != "{app}" {
+							depNames = append(depNames, fmt.Sprintf("%s (%s, %s) [%s]", depApp, depComp, depCompName, depRegion))
+						} else {
+							depNames = append(depNames, fmt.Sprintf("%s (%s, %s) [%s]", depComp, depComp, depCompName, depRegion))
 						}
 					}
-					depCompName := depComp
-					if compCfg, ok := mainConfig.Stack.Components[depComp]; ok {
-						depCompName = compCfg.Source
-					}
-					if depApp != "" && depApp != "{app}" {
-						depNames = append(depNames, fmt.Sprintf("%s (%s, %s) [%s]", depApp, depComp, depCompName, depRegion))
-					} else {
-						depNames = append(depNames, fmt.Sprintf("%s (%s, %s) [%s]", depComp, depComp, depCompName, depRegion))
-					}
 				}
+				diagram.WriteString(fmt.Sprintf("- `%s` depends on: %s\n", n.displayName, strings.Join(depNames, ", ")))
 			}
-			diagram.WriteString(fmt.Sprintf("- `%s` depends on: %s\n", displayName, strings.Join(depNames, ", ")))
 		}
+		diagram.WriteString("\n")
 	}
 
 	// --- Deployment Order Section ---
