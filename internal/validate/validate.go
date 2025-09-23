@@ -82,7 +82,8 @@ var ValidAzureResourceTypes = map[string]bool{
 	"azurerm_cdn_frontdoor_origin":                  true,
 	"azurerm_cdn_frontdoor_route":                   true,
 	"azurerm_static_site":                           true,
-	"azurerm_cdn_frontdoor_custom_domain":		 true,
+	"azurerm_cdn_frontdoor_custom_domain":		 	 true,
+	"azurerm_ai_foundry": 							 true,
 }
 
 // ValidationError represents a validation error with context
