@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/davoodharun/terragrunt-scaffolder/internal/config"
@@ -75,7 +76,7 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 
 	var diagram strings.Builder
 	diagram.WriteString("```mermaid\n")
-	diagram.WriteString("graph TD\n\n")
+	diagram.WriteString("graph LR\n\n")
 
 	nodeMap := make(map[string]struct {
 		sub, region, env, component, app string
@@ -103,7 +104,7 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 		if !foundEnv {
 			continue
 		}
-		diagram.WriteString(fmt.Sprintf("  subgraph %s\n", subName))
+		//diagram.WriteString(fmt.Sprintf("  subgraph %s\n", subName))
 		for _, env := range sub.Environments {
 			stackMatch := stackName
 			if env.Stack != "" {
@@ -113,8 +114,8 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 				continue
 			}
 			for region, comps := range mainConfig.Stack.Architecture.Regions {
-				label := fmt.Sprintf("%s_%s", region, env.Name)
-				diagram.WriteString(fmt.Sprintf("    subgraph %s [%s - %s]\n", label, region, env.Name))
+				// label := fmt.Sprintf("%s_%s", region, env.Name)
+				// diagram.WriteString(fmt.Sprintf("    subgraph %s [%s - %s]\n", label, region, env.Name))
 				for _, comp := range comps {
 					if len(comp.Apps) > 0 {
 						for _, app := range comp.Apps {
@@ -124,9 +125,9 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 							if baseIDCount[baseID] > 1 {
 								uniqueID = fmt.Sprintf("%s_%d", baseID, baseIDCount[baseID])
 							}
-							icon := getMermaidIcon(comp.Component)
-							label := fmt.Sprintf("%s (%s)", app, comp.Component)
-							diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", uniqueID, icon, label))
+							// icon := getMermaidIcon(comp.Component)
+							// label := fmt.Sprintf("%s (%s)", app, comp.Component)
+							// diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", uniqueID, icon, label))
 							nodeMap[uniqueID] = struct {
 								sub, region, env, component, app string
 								deps                             []string
@@ -141,9 +142,9 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 						if baseIDCount[baseID] > 1 {
 							uniqueID = fmt.Sprintf("%s_%d", baseID, baseIDCount[baseID])
 						}
-						icon := getMermaidIcon(comp.Component)
-						label := fmt.Sprintf("%s (%s)", comp.Component, comp.Component)
-						diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", uniqueID, icon, label))
+						// icon := getMermaidIcon(comp.Component)
+						// label := fmt.Sprintf("%s (%s)", comp.Component, comp.Component)
+						// diagram.WriteString(fmt.Sprintf("      %s[\"%s %s\"]:::azure\n", uniqueID, icon, label))
 						nodeMap[uniqueID] = struct {
 							sub, region, env, component, app string
 							deps                             []string
@@ -152,13 +153,193 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 						nodeKeyToID[nodeKey{comp.Component, subName, region, env.Name, ""}] = uniqueID
 					}
 				}
-				diagram.WriteString("    end\n")
+				//diagram.WriteString("    end\n")
+			}
+		}
+		//diagram.WriteString("  end\n\n")
+	}
+
+	// --- Deployment Order for Diagram ---
+	// Build dependency graph for diagram (reuse logic from deployment order section)
+	type nodeInfo struct {
+		id, displayName string
+		deps            []string
+		wave            int
+	}
+
+	graph := make(map[string]*nodeInfo)
+	idToDeps := make(map[string][]string)
+	idToDisplay := make(map[string]string)
+	for id, n := range nodeMap {
+		displayName := ""
+		if n.app != "" {
+			displayName = fmt.Sprintf("%s (%s, %s)", n.app, n.component, n.region)
+		} else {
+			displayName = fmt.Sprintf("%s (%s, %s)", n.component, n.component, n.region)
+		}
+		var depIDs []string
+		for _, dep := range n.deps {
+			parts := strings.Split(dep, ".")
+			if len(parts) >= 2 {
+				depRegion := parts[0]
+				if depRegion == "{region}" {
+					depRegion = n.region
+				}
+				depComp := parts[1]
+				depApp := ""
+				if len(parts) > 2 {
+					depApp = parts[2]
+					if depApp == "{app}" {
+						depApp = n.app
+					}
+				}
+				// Find the node ID for this dependency
+				depID := ""
+				for depNodeID, depNode := range nodeMap {
+					if depNode.component == depComp && depNode.region == depRegion && depNode.env == n.env && depNode.sub == n.sub {
+						if depApp != "" && depApp != "{app}" {
+							if depNode.app == depApp {
+								depID = depNodeID
+								break
+							}
+						} else if depApp == "" && depNode.app == "" {
+							depID = depNodeID
+							break
+						}
+					}
+				}
+				if depID != "" {
+					depIDs = append(depIDs, depID)
+				}
+			}
+		}
+		graph[id] = &nodeInfo{id, displayName, depIDs, -1}
+		idToDeps[id] = depIDs
+		idToDisplay[id] = displayName
+	}
+	// Robust wave assignment: assign wave 0 to nodes with no dependencies, others get 1+max(dep wave)
+	for id := range graph {
+		graph[id].wave = -1
+	}
+	changed := true
+	for changed {
+		changed = false
+		for id, n := range graph {
+			if n.wave != -1 {
+				continue
+			}
+			if len(idToDeps[id]) == 0 {
+				n.wave = 0
+				changed = true
+			} else {
+				maxDepWave := -1
+				allDepsSet := true
+				for _, dep := range idToDeps[id] {
+					if graph[dep].wave == -1 {
+						allDepsSet = false
+						break
+					}
+					if graph[dep].wave > maxDepWave {
+						maxDepWave = graph[dep].wave
+					}
+				}
+				if allDepsSet {
+					n.wave = maxDepWave + 1
+					changed = true
+				}
+			}
+		}
+	}
+
+	// Group nodes by wave
+	waves := [][]string{}
+	maxWave := -1
+	for _, n := range graph {
+		if n.wave > maxWave {
+			maxWave = n.wave
+		}
+	}
+	for i := 0; i <= maxWave; i++ {
+		waves = append(waves, []string{})
+	}
+	for id, n := range graph {
+		waves[n.wave] = append(waves[n.wave], id)
+	}
+	// Sort each wave for deterministic output
+	for i := range waves {
+		sort.Strings(waves[i])
+	}
+
+	// Output nodes grouped by deployment wave (column), grouped by component type, using subgraphs for each wave
+	for waveIdx, wave := range waves {
+		if len(wave) == 0 {
+			continue
+		}
+		diagram.WriteString(fmt.Sprintf("  subgraph Wave %d\n", waveIdx+1))
+		compTypeToNodes := make(map[string][]string)
+		for _, id := range wave {
+			n := nodeMap[id]
+			compTypeToNodes[n.component] = append(compTypeToNodes[n.component], id)
+		}
+		for _, ids := range compTypeToNodes {
+			for _, id := range ids {
+				n := nodeMap[id]
+				icon := getMermaidIcon(n.component)
+				label := ""
+				if n.app != "" {
+					label = fmt.Sprintf("%s (%s, %s)", n.app, n.component, n.region)
+				} else {
+					label = fmt.Sprintf("%s (%s, %s)", n.component, n.component, n.region)
+				}
+				diagram.WriteString(fmt.Sprintf("    %s[\"%s %s\"]:::azure\n", id, icon, label))
 			}
 		}
 		diagram.WriteString("  end\n\n")
 	}
 
-	diagram.WriteString("\nclassDef azure fill:#0072C6,stroke:#0072C6,color:white\n\n")
+	// Draw dependency arrows (left to right, dependency to dependent)
+	for _, wave := range waves {
+		for _, id := range wave {
+			n := nodeMap[id]
+			for _, dep := range n.deps {
+				parts := strings.Split(dep, ".")
+				if len(parts) >= 2 {
+					depRegion := parts[0]
+					if depRegion == "{region}" {
+						depRegion = n.region
+					}
+					depComp := parts[1]
+					depApp := ""
+					if len(parts) > 2 {
+						depApp = parts[2]
+						if depApp == "{app}" {
+							depApp = n.app
+						}
+					}
+					depID := ""
+					for depNodeID, depNode := range nodeMap {
+						if depNode.component == depComp && depNode.region == depRegion && depNode.env == n.env && depNode.sub == n.sub {
+							if depApp != "" && depApp != "{app}" {
+								if depNode.app == depApp {
+									depID = depNodeID
+									break
+								}
+							} else if depApp == "" && depNode.app == "" {
+								depID = depNodeID
+								break
+							}
+						}
+					}
+					if depID != "" {
+						diagram.WriteString(fmt.Sprintf("%s --> %s\n", depID, id))
+					}
+				}
+			}
+		}
+	}
+
+	diagram.WriteString("\nclassDef azure fill:#0072C6,stroke:#0072C6,color:white\n")
+	diagram.WriteString("classDef invisible fill:#0000,stroke:#0000,color:#0000\n\n")
 	diagram.WriteString("```\n")
 
 	// Write dependency summary in Markdown
@@ -228,93 +409,6 @@ func generateMermaidDiagram(stackName string, tgsConfig *config.TGSConfig, envNa
 
 	// --- Deployment Order Section ---
 	diagram.WriteString("\n## Deployment Order\n\n")
-	// Build dependency graph
-	type nodeInfo struct {
-		id, displayName string
-		deps            []string
-	}
-
-	graph := make(map[string]*nodeInfo)
-	idToDeps := make(map[string][]string)
-	idToDisplay := make(map[string]string)
-	for id, n := range nodeMap {
-		displayName := ""
-		if n.app != "" {
-			displayName = fmt.Sprintf("%s (%s) [%s]", n.app, n.component, n.region)
-		} else {
-			displayName = fmt.Sprintf("%s (%s) [%s]", n.component, n.component, n.region)
-		}
-		var depIDs []string
-		for _, dep := range n.deps {
-			parts := strings.Split(dep, ".")
-			if len(parts) >= 2 {
-				depRegion := parts[0]
-				if depRegion == "{region}" {
-					depRegion = n.region
-				}
-				depComp := parts[1]
-				depApp := ""
-				if len(parts) > 2 {
-					depApp = parts[2]
-					if depApp == "{app}" {
-						depApp = n.app
-					}
-				}
-				// Find the node ID for this dependency
-				depID := ""
-				for depNodeID, depNode := range nodeMap {
-					if depNode.component == depComp && depNode.region == depRegion && depNode.env == n.env && depNode.sub == n.sub {
-						if depApp != "" && depApp != "{app}" {
-							if depNode.app == depApp {
-								depID = depNodeID
-								break
-							}
-						} else if depApp == "" && depNode.app == "" {
-							depID = depNodeID
-							break
-						}
-					}
-				}
-				if depID != "" {
-					depIDs = append(depIDs, depID)
-				}
-			}
-		}
-		graph[id] = &nodeInfo{id, displayName, depIDs}
-		idToDeps[id] = depIDs
-		idToDisplay[id] = displayName
-	}
-	// Topological sort by waves
-	waves := [][]string{}
-	visited := make(map[string]bool)
-	remaining := make(map[string]bool)
-	for id := range graph {
-		remaining[id] = true
-	}
-	for len(remaining) > 0 {
-		var wave []string
-		for id := range remaining {
-			allDepsVisited := true
-			for _, dep := range idToDeps[id] {
-				if !visited[dep] {
-					allDepsVisited = false
-					break
-				}
-			}
-			if allDepsVisited {
-				wave = append(wave, id)
-			}
-		}
-		if len(wave) == 0 {
-			// Cycle detected or orphan node
-			break
-		}
-		waves = append(waves, wave)
-		for _, id := range wave {
-			visited[id] = true
-			delete(remaining, id)
-		}
-	}
 	// Output waves
 	for i, wave := range waves {
 		diagram.WriteString(fmt.Sprintf("**Wave %d:**\n", i+1))
